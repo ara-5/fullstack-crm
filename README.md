@@ -94,3 +94,7 @@ Search uses `contains`. That is case-insensitive on SQLite but case-sensitive on
 - Set a strong `AUTH_SECRET`, and configure SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`).
 - Only admins can add webhook URLs. If untrusted admins are possible, restrict them to public hosts to prevent SSRF.
 - Automations run inline with the request, and webhooks run after the response via `after()`. For high volume, move both to a job queue.
+
+## License
+
+[MIT](LICENSE) © 2026 Ara
