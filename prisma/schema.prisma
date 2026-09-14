@@ -1,0 +1,171 @@
+// Enum-like fields are stored as String so the schema stays portable between
+// SQLite (local dev) and PostgreSQL (production). Allowed values live in
+// src/lib/constants.ts. To switch to Postgres, change `provider` and DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("REP") // ADMIN | MANAGER | REP
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  companies  Company[]  @relation("CompanyOwner")
+  contacts   Contact[]  @relation("ContactOwner")
+  deals      Deal[]     @relation("DealOwner")
+  activities Activity[] @relation("ActivityOwner")
+  apiKeys    ApiKey[]
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  domain    String?
+  industry  String?
+  size      String?
+  phone     String?
+  address   String?
+  ownerId   String?
+  owner     User?    @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contacts   Contact[]
+  deals      Deal[]
+  activities Activity[]
+
+  @@index([ownerId])
+  @@index([name])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  title     String?
+  status    String   @default("LEAD") // LEAD | PROSPECT | CUSTOMER | CHURNED
+  source    String?
+  tags      String   @default("") // comma-separated
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  ownerId   String?
+  owner     User?    @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deals      Deal[]
+  activities Activity[]
+
+  @@index([ownerId])
+  @@index([email])
+  @@index([status])
+}
+
+model Deal {
+  id            String    @id @default(cuid())
+  title         String
+  value         Float     @default(0)
+  currency      String    @default("USD")
+  stage         String    @default("LEAD") // see DEAL_STAGES
+  probability   Int       @default(10)
+  expectedClose DateTime?
+  closedAt      DateTime?
+  companyId     String?
+  company       Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId     String?
+  contact       Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  ownerId       String?
+  owner         User?     @relation("DealOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  activities Activity[]
+
+  @@index([stage])
+  @@index([ownerId])
+}
+
+model Activity {
+  id          String    @id @default(cuid())
+  type        String // TASK | CALL | MEETING | EMAIL | NOTE
+  subject     String
+  body        String?
+  priority    String    @default("MEDIUM") // LOW | MEDIUM | HIGH
+  dueAt       DateTime?
+  completedAt DateTime?
+  contactId   String?
+  contact     Contact?  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  companyId   String?
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId      String?
+  deal        Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  ownerId     String?
+  owner       User?     @relation("ActivityOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerId, completedAt])
+  @@index([dueAt])
+}
+
+model AutomationRule {
+  id           String    @id @default(cuid())
+  name         String
+  active       Boolean   @default(true)
+  trigger      String // a CrmEvent, e.g. "deal.stage_changed"
+  conditions   String    @default("{}") // JSON: { toStage?, fromStage?, minValue?, contactStatus? }
+  action       String // CREATE_TASK | SEND_EMAIL | UPDATE_CONTACT_STATUS
+  actionConfig String    @default("{}") // JSON, shape depends on action
+  runCount     Int       @default(0)
+  lastRunAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Webhook {
+  id              String    @id @default(cuid())
+  url             String
+  events          String // comma-separated CrmEvents, or "*"
+  secret          String
+  active          Boolean   @default(true)
+  lastStatus      Int?
+  lastDeliveredAt DateTime?
+  createdAt       DateTime  @default(now())
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  prefix     String
+  keyHash    String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  status    String // SENT | LOGGED | FAILED
+  error     String?
+  contactId String?
+  createdAt DateTime @default(now())
+
+  @@index([contactId])
+}
