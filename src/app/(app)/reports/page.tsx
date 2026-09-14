@@ -14,18 +14,24 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
   const user = await requireUser();
   const requested = Number(first((await searchParams).days));
   const period = REPORT_PERIODS.find((p) => p.days === requested) ?? REPORT_PERIODS[1];
-  const { totals, reps, sources } = await getReportsData(user, period.days);
+  const { currency, excludedDeals, totals, reps, sources } = await getReportsData(user, period.days);
   const topWon = Math.max(0, ...reps.map((r) => r.wonValue));
+  const money = (value: number, compact = false) => formatCurrency(value, currency, compact);
 
   return (
     <>
       <PageHeader
         title="Reports"
-        description={user.role === "REP" ? "Your sales performance." : "Team sales performance."}
+        description={
+          <>
+            {user.role === "REP" ? "Your sales performance." : "Team sales performance."} Amounts in {currency}
+            {excludedDeals > 0 && ` (${excludedDeals} deals in other currencies are counted but not summed)`}.
+          </>
+        }
       />
 
       {/* One filter row scopes everything below it. */}
-      <nav aria-label="Report period" className="mb-6 inline-flex flex-wrap rounded-md bg-white p-0.5 text-sm ring-1 ring-slate-300">
+      <nav aria-label="Report period" className="mb-6 inline-flex flex-wrap rounded-md bg-surface p-0.5 text-sm ring-1 ring-slate-300">
         {REPORT_PERIODS.map((p) => (
           <Link
             key={p.days}
@@ -33,7 +39,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
             aria-current={p.days === period.days ? "page" : undefined}
             className={cx(
               "rounded px-3 py-1 font-medium",
-              p.days === period.days ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900",
+              p.days === period.days ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900",
             )}
           >
             {p.label}
@@ -42,11 +48,11 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
       </nav>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <StatTile label="Won revenue" value={formatCurrency(totals.wonValue, "USD", true)} hint={`${totals.wonCount} deals won`} />
+        <StatTile label="Won revenue" value={money(totals.wonValue, true)} hint={`${totals.wonCount} deals won`} />
         <StatTile label="Win rate" value={pct(totals.winRate)} hint={`${totals.wonCount} won · ${totals.lostCount} lost`} />
-        <StatTile label="Average deal size" value={totals.avgDeal === null ? "—" : formatCurrency(totals.avgDeal, "USD", true)} hint="Won deals" />
+        <StatTile label="Average deal size" value={totals.avgDeal === null ? "—" : money(totals.avgDeal, true)} hint="Won deals" />
         <StatTile label="Average sales cycle" value={totals.cycleDays === null ? "—" : `${Math.round(totals.cycleDays)} days`} hint="Created to won" />
-        <StatTile label="Open pipeline" value={formatCurrency(totals.pipeline, "USD", true)} hint={`${totals.openCount} open deals (current)`} />
+        <StatTile label="Open pipeline" value={money(totals.pipeline, true)} hint={`${totals.openCount} open deals (current)`} />
       </div>
 
       <Card title="Performance by owner" className="mt-6" padded={false}>
@@ -74,7 +80,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
               {reps.map((r) => (
                 <tr key={r.id}>
                   <td className={`${td} font-medium text-slate-900`}>{r.name}</td>
-                  <td className={`${td} text-right tabular-nums`}>{formatCurrency(r.wonValue)}</td>
+                  <td className={`${td} text-right tabular-nums`}>{money(r.wonValue)}</td>
                   <td className={`${td} w-40`}>
                     <InlineBar ratio={topWon ? r.wonValue / topWon : 0} label={`${r.name} won revenue relative to top`} />
                   </td>
@@ -82,10 +88,10 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
                     {r.wonCount} / {r.lostCount}
                   </td>
                   <td className={`${td} text-right tabular-nums`}>{pct(r.winRate)}</td>
-                  <td className={`${td} text-right tabular-nums`}>{r.avgDeal === null ? "—" : formatCurrency(r.avgDeal)}</td>
+                  <td className={`${td} text-right tabular-nums`}>{r.avgDeal === null ? "—" : money(r.avgDeal)}</td>
                   <td className={`${td} text-right tabular-nums`}>{r.cycleDays === null ? "—" : `${Math.round(r.cycleDays)} d`}</td>
                   <td className={`${td} text-right tabular-nums`}>
-                    {formatCurrency(r.pipeline)} <span className="text-xs text-slate-400">({r.openCount})</span>
+                    {money(r.pipeline)} <span className="text-xs text-slate-500">({r.openCount})</span>
                   </td>
                 </tr>
               ))}
@@ -95,9 +101,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
       </Card>
 
       <Card title="Lead sources" className="mt-6" padded={false}>
-        <p className="px-4 pt-3 text-xs text-slate-500">
-          Contacts created in this period, and how many are now customers.
-        </p>
+        <p className="px-4 pt-3 text-xs text-slate-500">Contacts created in this period, and how many are now customers.</p>
         {sources.length === 0 ? (
           <div className="p-4">
             <EmptyState>No new contacts in this period.</EmptyState>

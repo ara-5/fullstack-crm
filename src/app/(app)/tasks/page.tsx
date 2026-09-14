@@ -42,14 +42,14 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
         description="Calls, meetings, emails and to-dos. Tick one off to complete it."
         actions={
           user.role !== "REP" && (
-            <div className="inline-flex rounded-md bg-white p-0.5 text-sm ring-1 ring-slate-300">
+            <div className="inline-flex rounded-md bg-surface p-0.5 text-sm ring-1 ring-slate-300">
               {(["mine", "team"] as const).map((scope) => (
                 <Link
                   key={scope}
                   href={href(view, scope)}
                   className={cx(
                     "rounded px-3 py-1 font-medium",
-                    (scope === "team") === team ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900",
+                    (scope === "team") === team ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900",
                   )}
                 >
                   {scope === "mine" ? "Mine" : "Whole team"}

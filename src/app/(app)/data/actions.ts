@@ -3,6 +3,7 @@
 import Papa from "papaparse";
 import { revalidatePath } from "next/cache";
 import { createCompany, createContact, type Actor } from "@/lib/crm";
+import { normalizeHeader, splitFullName } from "@/lib/csv";
 import { errorToActionState, type ActionState } from "@/lib/errors";
 import { can, ownerScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -10,38 +11,6 @@ import { requireUser } from "@/lib/session";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_ROWS = 5000;
-
-// Map common spreadsheet headers ("First Name", "E-mail", "Company Name"…) to our fields.
-const HEADER_ALIASES: Record<string, string> = {
-  firstname: "firstName",
-  first: "firstName",
-  givenname: "firstName",
-  lastname: "lastName",
-  last: "lastName",
-  surname: "lastName",
-  fullname: "name",
-  email: "email",
-  emailaddress: "email",
-  phone: "phone",
-  phonenumber: "phone",
-  mobile: "phone",
-  title: "title",
-  jobtitle: "title",
-  status: "status",
-  source: "source",
-  leadsource: "source",
-  tags: "tags",
-  company: "company",
-  companyname: "company",
-  organization: "company",
-  website: "domain",
-  companysize: "size",
-};
-
-function normalizeHeader(header: string) {
-  const key = header.toLowerCase().replace(/[^a-z]/g, "");
-  return HEADER_ALIASES[key] ?? key;
-}
 
 function describe(err: unknown) {
   const state = errorToActionState(err);
@@ -61,7 +30,7 @@ async function companyIdFor(actor: Actor, name: string, cache: Map<string, strin
   if (cached) return cached;
 
   const existing = await prisma.company.findFirst({
-    where: { name: trimmed, ...ownerScope(actor) },
+    where: { name: { equals: trimmed, mode: "insensitive" }, ...ownerScope(actor) },
     select: { id: true },
   });
   const id = existing?.id ?? (await createCompany(actor, { name: trimmed })).id;
@@ -102,17 +71,11 @@ export async function importCsvAction(formData: FormData): Promise<ActionState> 
           address: row.address,
         });
       } else {
-        let { firstName, lastName } = row;
-        if (!firstName && row.name) {
-          const [head, ...rest] = row.name.trim().split(/\s+/);
-          firstName = head;
-          lastName = rest.join(" ");
-        }
+        const names = !row.firstName && row.name ? splitFullName(row.name) : { firstName: row.firstName, lastName: row.lastName };
         await createContact(
           user,
           {
-            firstName,
-            lastName,
+            ...names,
             email: row.email,
             phone: row.phone,
             title: row.title,

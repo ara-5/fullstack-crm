@@ -65,7 +65,7 @@ export default async function AutomationsPage() {
                         <Badge tone={rule.active ? "green" : "slate"}>{rule.active ? "Active" : "Paused"}</Badge>
                       </div>
                       <p className="mt-1 text-sm text-slate-600">{describeRule(rule)}</p>
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-500">
                         Ran {rule.runCount} time{rule.runCount === 1 ? "" : "s"}
                         {rule.lastRunAt && ` · last ${formatDateTime(rule.lastRunAt)}`}
                       </p>

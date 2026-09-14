@@ -8,6 +8,8 @@ import { DealList } from "@/components/deal-list";
 import { ActivityFields } from "@/components/forms/activity-fields";
 import { CompanyFields } from "@/components/forms/company-fields";
 import { ButtonLink, Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
+import { AuditHistory } from "@/components/audit-history";
+import { listAuditEntries } from "@/lib/audit";
 import { getCompany, userOptions } from "@/lib/crm";
 import { can } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
@@ -23,7 +25,10 @@ export default async function CompanyPage({ params }: PageProps<"/companies/[id]
   const company = await getCompany(user, id);
   if (!company) notFound();
 
-  const owners = can.reassignOwner(user) ? await userOptions() : undefined;
+  const [owners, history] = await Promise.all([
+    can.reassignOwner(user) ? userOptions() : undefined,
+    listAuditEntries("company", company.id),
+  ]);
   const wonValue = company.deals.filter((d) => d.stage === "WON").reduce((sum, d) => sum + d.value, 0);
 
   return (
@@ -95,6 +100,9 @@ export default async function CompanyPage({ params }: PageProps<"/companies/[id]
           </Card>
           <Card title="Deals">
             <DealList deals={company.deals} />
+          </Card>
+          <Card title="History">
+            <AuditHistory entries={history} />
           </Card>
         </div>
       </div>

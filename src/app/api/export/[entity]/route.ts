@@ -1,16 +1,10 @@
 import type { NextRequest } from "next/server";
 import Papa from "papaparse";
 import { EXPORTABLE_ENTITIES, type ExportableEntity } from "@/lib/constants";
+import { safeCell } from "@/lib/csv";
 import { can, ownerScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-
-// Prevent spreadsheet formula injection when the CSV is opened in Excel/Sheets.
-function safeCell(value: unknown) {
-  if (value === null || value === undefined) return "";
-  const text = value instanceof Date ? value.toISOString() : String(value);
-  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-}
 
 async function rowsFor(entity: ExportableEntity, where: { ownerId?: string }): Promise<Record<string, unknown>[]> {
   const related = { owner: { select: { name: true } } } as const;
@@ -53,6 +47,7 @@ async function rowsFor(entity: ExportableEntity, where: { ownerId?: string }): P
     case "deals": {
       const rows = await prisma.deal.findMany({
         where,
+        omit: { aiInsights: true },
         include: {
           ...related,
           company: { select: { name: true } },

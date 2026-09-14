@@ -1,10 +1,13 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { can, ownerScope } from "@/lib/permissions";
+import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/automation";
 import { CLOSED_STAGES, OPEN_STAGES, stageInfo, type Role } from "@/lib/constants";
+import { DEFAULT_IGNORED, diffRecords } from "@/lib/diff";
 import { CrmError, forbidden } from "@/lib/errors";
+import { can, ownerScope } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { addDays, formatCurrency, fullName } from "@/lib/utils";
 import {
   activityInput,
   activityPatch,
@@ -15,12 +18,11 @@ import {
   dealInput,
   dealPatch,
 } from "@/lib/validation";
-import { addDays, fullName } from "@/lib/utils";
 
 /**
  * Service layer. Server Actions, the REST API and CSV import all go through
- * these functions, so validation, record-level permissions and domain events
- * (automations + webhooks) behave identically everywhere.
+ * these functions, so validation, record-level permissions, the audit log and
+ * domain events (automations + webhooks) behave identically everywhere.
  */
 
 export type Actor = { id: string; role: Role };
@@ -37,6 +39,9 @@ export const activityInclude = {
 } satisfies Prisma.ActivityInclude;
 
 // ---------------------------------------------------------------- helpers
+
+/** Case-insensitive "contains" filter (Postgres ILIKE). */
+const ci = (value: string) => ({ contains: value, mode: "insensitive" as const });
 
 function paginate(opts: { page?: number; pageSize?: number }) {
   const pageSize = Math.min(Math.max(Math.floor(opts.pageSize ?? 25), 1), 100);
@@ -129,6 +134,64 @@ export async function userOptions(): Promise<Option[]> {
   return rows.map((u) => ({ id: u.id, label: u.name }));
 }
 
+// ---------------------------------------------------------------- global search
+
+export type SearchResult = { group: "Contacts" | "Companies" | "Deals"; id: string; title: string; subtitle: string; href: string };
+
+export async function searchRecords(actor: Actor, q: string): Promise<SearchResult[]> {
+  const scope = ownerScope(actor);
+  const [first, ...rest] = q.split(/\s+/);
+  const [contacts, companies, deals] = await Promise.all([
+    prisma.contact.findMany({
+      where: {
+        ...scope,
+        OR: [
+          { firstName: ci(q) },
+          { lastName: ci(q) },
+          { email: ci(q) },
+          ...(rest.length ? [{ AND: [{ firstName: ci(first) }, { lastName: ci(rest.join(" ")) }] }] : []),
+        ],
+      },
+      take: 5,
+      select: { id: true, firstName: true, lastName: true, email: true, company: { select: { name: true } } },
+    }),
+    prisma.company.findMany({
+      where: { ...scope, OR: [{ name: ci(q) }, { domain: ci(q) }] },
+      take: 5,
+      select: { id: true, name: true, domain: true, industry: true },
+    }),
+    prisma.deal.findMany({
+      where: { ...scope, title: ci(q) },
+      take: 5,
+      select: { id: true, title: true, stage: true, value: true, currency: true },
+    }),
+  ]);
+
+  return [
+    ...contacts.map((c) => ({
+      group: "Contacts" as const,
+      id: c.id,
+      title: fullName(c),
+      subtitle: c.company?.name ?? c.email ?? "",
+      href: `/contacts/${c.id}`,
+    })),
+    ...companies.map((c) => ({
+      group: "Companies" as const,
+      id: c.id,
+      title: c.name,
+      subtitle: c.domain ?? c.industry ?? "",
+      href: `/companies/${c.id}`,
+    })),
+    ...deals.map((d) => ({
+      group: "Deals" as const,
+      id: d.id,
+      title: d.title,
+      subtitle: `${stageInfo(d.stage).label} · ${formatCurrency(d.value, d.currency)}`,
+      href: `/deals/${d.id}`,
+    })),
+  ];
+}
+
 // ---------------------------------------------------------------- contacts
 
 export async function listContacts(
@@ -139,11 +202,13 @@ export async function listContacts(
   if (opts.status) where.status = opts.status;
   if (opts.companyId) where.companyId = opts.companyId;
   if (opts.q) {
+    const terms = opts.q.trim().split(/\s+/);
     where.OR = [
-      { firstName: { contains: opts.q } },
-      { lastName: { contains: opts.q } },
-      { email: { contains: opts.q } },
-      { company: { name: { contains: opts.q } } },
+      { firstName: ci(opts.q) },
+      { lastName: ci(opts.q) },
+      { email: ci(opts.q) },
+      { company: { name: ci(opts.q) } },
+      ...(terms.length > 1 ? [{ AND: [{ firstName: ci(terms[0]) }, { lastName: ci(terms.slice(1).join(" ")) }] }] : []),
     ];
   }
   const { page, pageSize, skip, take } = paginate(opts);
@@ -196,13 +261,14 @@ export async function createContact(actor: Actor, input: unknown, opts: EmitOpti
       ownerId: await ownerForCreate(actor, data.ownerId),
     },
   });
+  await recordAudit({ actorId: actor.id, entityType: "contact", entityId: contact.id, action: "created", summary: fullName(contact) });
   if (opts.emit !== false) await emitEvent("contact.created", { actorId: actor.id, contact });
   return contact;
 }
 
 export async function updateContact(actor: Actor, id: string, input: unknown) {
   const { ownerId, tags, ...rest } = contactPatch.parse(input);
-  const existing = await prisma.contact.findFirst({ where: { id, ...ownerScope(actor) }, select: { id: true } });
+  const existing = await prisma.contact.findFirst({ where: { id, ...ownerScope(actor) } });
   if (!existing) throw new CrmError(404, "Contact not found");
   await assertLinks(actor, { companyId: rest.companyId });
 
@@ -210,14 +276,20 @@ export async function updateContact(actor: Actor, id: string, input: unknown) {
     where: { id },
     data: { ...rest, tags: normalizeTags(tags), ...(await ownerForUpdate(actor, ownerId)) },
   });
+  await recordAudit({ actorId: actor.id, entityType: "contact", entityId: id, action: "updated", changes: diffRecords(existing, contact) });
   await emitEvent("contact.updated", { actorId: actor.id, contact });
   return contact;
 }
 
 export async function deleteContact(actor: Actor, id: string) {
   assertCanDelete(actor);
-  const { count } = await prisma.contact.deleteMany({ where: { id, ...ownerScope(actor) } });
-  if (count === 0) throw new CrmError(404, "Contact not found");
+  const existing = await prisma.contact.findFirst({
+    where: { id, ...ownerScope(actor) },
+    select: { firstName: true, lastName: true },
+  });
+  if (!existing) throw new CrmError(404, "Contact not found");
+  await prisma.contact.delete({ where: { id } });
+  await recordAudit({ actorId: actor.id, entityType: "contact", entityId: id, action: "deleted", summary: fullName(existing) });
 }
 
 // ---------------------------------------------------------------- companies
@@ -225,7 +297,7 @@ export async function deleteContact(actor: Actor, id: string) {
 export async function listCompanies(actor: Actor, opts: { q?: string; page?: number; pageSize?: number } = {}) {
   const where: Prisma.CompanyWhereInput = { ...ownerScope(actor) };
   if (opts.q) {
-    where.OR = [{ name: { contains: opts.q } }, { domain: { contains: opts.q } }, { industry: { contains: opts.q } }];
+    where.OR = [{ name: ci(opts.q) }, { domain: ci(opts.q) }, { industry: ci(opts.q) }];
   }
   const { page, pageSize, skip, take } = paginate(opts);
   const [items, total] = await prisma.$transaction([
@@ -264,23 +336,29 @@ export async function getCompany(actor: Actor, id: string) {
 
 export async function createCompany(actor: Actor, input: unknown) {
   const data = companyInput.parse(input);
-  return prisma.company.create({ data: { ...data, ownerId: await ownerForCreate(actor, data.ownerId) } });
+  const company = await prisma.company.create({ data: { ...data, ownerId: await ownerForCreate(actor, data.ownerId) } });
+  await recordAudit({ actorId: actor.id, entityType: "company", entityId: company.id, action: "created", summary: company.name });
+  return company;
 }
 
 export async function updateCompany(actor: Actor, id: string, input: unknown) {
   const { ownerId, ...rest } = companyPatch.parse(input);
-  const existing = await prisma.company.findFirst({ where: { id, ...ownerScope(actor) }, select: { id: true } });
+  const existing = await prisma.company.findFirst({ where: { id, ...ownerScope(actor) } });
   if (!existing) throw new CrmError(404, "Company not found");
-  return prisma.company.update({
+  const company = await prisma.company.update({
     where: { id },
     data: { ...rest, ...(await ownerForUpdate(actor, ownerId)) },
   });
+  await recordAudit({ actorId: actor.id, entityType: "company", entityId: id, action: "updated", changes: diffRecords(existing, company) });
+  return company;
 }
 
 export async function deleteCompany(actor: Actor, id: string) {
   assertCanDelete(actor);
-  const { count } = await prisma.company.deleteMany({ where: { id, ...ownerScope(actor) } });
-  if (count === 0) throw new CrmError(404, "Company not found");
+  const existing = await prisma.company.findFirst({ where: { id, ...ownerScope(actor) }, select: { name: true } });
+  if (!existing) throw new CrmError(404, "Company not found");
+  await prisma.company.delete({ where: { id } });
+  await recordAudit({ actorId: actor.id, entityType: "company", entityId: id, action: "deleted", summary: existing.name });
 }
 
 // ---------------------------------------------------------------- deals
@@ -291,7 +369,7 @@ export async function listDeals(
 ) {
   const where: Prisma.DealWhereInput = { ...ownerScope(actor) };
   if (opts.stage) where.stage = opts.stage;
-  if (opts.q) where.title = { contains: opts.q };
+  if (opts.q) where.title = ci(opts.q);
   if (opts.recentClosedDays) {
     where.OR = [
       { stage: { in: OPEN_STAGES } },
@@ -302,6 +380,7 @@ export async function listDeals(
     where,
     orderBy: { updatedAt: "desc" },
     take: 500,
+    omit: { aiInsights: true },
     include: {
       company: { select: { id: true, name: true } },
       contact: { select: { id: true, firstName: true, lastName: true } },
@@ -316,7 +395,7 @@ export async function getDeal(actor: Actor, id: string) {
     where: { id, ...scope },
     include: {
       company: { select: { id: true, name: true } },
-      contact: { select: { id: true, firstName: true, lastName: true, email: true } },
+      contact: { select: { id: true, firstName: true, lastName: true, email: true, title: true } },
       owner: ownerSelect,
       activities: { where: scope, orderBy: { createdAt: "desc" }, include: activityInclude },
     },
@@ -346,6 +425,13 @@ export async function createDeal(actor: Actor, input: unknown, opts: EmitOptions
       ownerId: await ownerForCreate(actor, data.ownerId),
     },
   });
+  await recordAudit({
+    actorId: actor.id,
+    entityType: "deal",
+    entityId: deal.id,
+    action: "created",
+    summary: `${deal.title} (${formatCurrency(deal.value, deal.currency)})`,
+  });
   if (opts.emit !== false) await emitEvent("deal.created", { actorId: actor.id, deal });
   return deal;
 }
@@ -365,7 +451,24 @@ export async function updateDeal(actor: Actor, id: string, input: unknown) {
   }
 
   const deal = await prisma.deal.update({ where: { id }, data: patch });
+
+  // Stage moves get their own, clearer audit entry.
+  await recordAudit({
+    actorId: actor.id,
+    entityType: "deal",
+    entityId: id,
+    action: "updated",
+    changes: diffRecords(existing, deal, [...DEFAULT_IGNORED, "stage", "probability", "closedAt"]),
+  });
   if (newStage) {
+    await recordAudit({
+      actorId: actor.id,
+      entityType: "deal",
+      entityId: id,
+      action: "stage_changed",
+      summary: `${stageInfo(existing.stage).label} → ${stageInfo(newStage).label}`,
+      changes: { stage: { from: existing.stage, to: newStage } },
+    });
     await emitEvent("deal.stage_changed", {
       actorId: actor.id,
       deal,
@@ -378,8 +481,10 @@ export async function updateDeal(actor: Actor, id: string, input: unknown) {
 
 export async function deleteDeal(actor: Actor, id: string) {
   assertCanDelete(actor);
-  const { count } = await prisma.deal.deleteMany({ where: { id, ...ownerScope(actor) } });
-  if (count === 0) throw new CrmError(404, "Deal not found");
+  const existing = await prisma.deal.findFirst({ where: { id, ...ownerScope(actor) }, select: { title: true } });
+  if (!existing) throw new CrmError(404, "Deal not found");
+  await prisma.deal.delete({ where: { id } });
+  await recordAudit({ actorId: actor.id, entityType: "deal", entityId: id, action: "deleted", summary: existing.title });
 }
 
 // ---------------------------------------------------------------- activities
@@ -398,7 +503,10 @@ export async function listActivities(
   const where: Prisma.ActivityWhereInput = { ...ownerScope(actor), type: { not: "NOTE" } };
   if (opts.mine) where.ownerId = actor.id;
 
-  let orderBy: Prisma.ActivityOrderByWithRelationInput[] = [{ dueAt: "asc" }, { createdAt: "desc" }];
+  let orderBy: Prisma.ActivityOrderByWithRelationInput[] = [
+    { dueAt: { sort: "asc", nulls: "last" } },
+    { createdAt: "desc" },
+  ];
   switch (opts.view ?? "open") {
     case "open":
       where.completedAt = null;

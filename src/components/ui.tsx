@@ -4,12 +4,13 @@ import { titleCase } from "@/lib/constants";
 import { cx } from "@/lib/utils";
 
 // Server-safe primitives (no hooks), usable from server and client components.
+// Colors use theme tokens (surface, slate…) that are remapped in dark mode.
 
 const buttonVariants = {
   primary: "bg-indigo-600 text-white shadow-sm hover:bg-indigo-500",
-  secondary: "bg-white text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50",
-  danger: "bg-white text-red-600 ring-1 ring-inset ring-red-200 hover:bg-red-50",
-  ghost: "text-slate-500 hover:bg-slate-100 hover:text-slate-800",
+  secondary: "bg-surface text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50",
+  danger: "bg-surface text-red-700 ring-1 ring-inset ring-red-200 hover:bg-red-50",
+  ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
 };
 export type ButtonVariant = keyof typeof buttonVariants;
 
@@ -35,7 +36,7 @@ export function ButtonLink({ variant, className, ...props }: ComponentProps<type
 }
 
 const fieldClass =
-  "block w-full rounded-md border-0 bg-white px-2.5 py-1.5 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500";
+  "block w-full rounded-md border-0 bg-surface px-2.5 py-1.5 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cx(fieldClass, className)} {...props} />;
@@ -63,7 +64,7 @@ export function Card({
   padded?: boolean;
 }) {
   return (
-    <section className={cx("rounded-xl border border-slate-200 bg-white shadow-sm", className)}>
+    <section className={cx("rounded-xl border border-slate-200 bg-surface shadow-sm", className)}>
       {(title || actions) && (
         <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-900">{title}</h2>

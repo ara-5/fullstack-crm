@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { ActivityList } from "@/components/activity-list";
 import { MonthlyWonChart, PipelineStageChart } from "@/components/charts";
+import { HealthBadge } from "@/components/health-badge";
 import { ChartTable, InlineBar, StatTile } from "@/components/stats";
 import { ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
+import { getDealsNeedingAttention } from "@/lib/health";
 import { getDashboardData } from "@/lib/reports";
 import { requireUser } from "@/lib/session";
 import { first, formatCurrency } from "@/lib/utils";
@@ -12,9 +15,13 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
   const user = await requireUser();
   const denied = first((await searchParams).denied) === "1";
-  const { kpis, monthly, stages, leaderboard, upcomingTasks } = await getDashboardData(user);
+  const [{ currency, kpis, monthly, stages, leaderboard, upcomingTasks }, attention] = await Promise.all([
+    getDashboardData(user),
+    getDealsNeedingAttention(user, 5),
+  ]);
   const isRep = user.role === "REP";
   const topWon = leaderboard[0]?.won ?? 0;
+  const money = (value: number) => formatCurrency(value, currency, true);
 
   return (
     <>
@@ -30,9 +37,17 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Open pipeline" value={formatCurrency(kpis.pipelineValue, "USD", true)} hint={`${kpis.openDeals} open deals`} />
-        <StatTile label="Weighted forecast" value={formatCurrency(kpis.weightedForecast, "USD", true)} hint="Value × stage probability" />
-        <StatTile label="Won this month" value={formatCurrency(kpis.wonThisMonth, "USD", true)} hint={`${formatCurrency(kpis.wonLastMonth, "USD", true)} last month`} />
+        <StatTile
+          label="Open pipeline"
+          value={money(kpis.pipelineValue)}
+          hint={
+            kpis.excludedOpenDeals
+              ? `${kpis.openDeals} open deals (${kpis.excludedOpenDeals} in other currencies not included)`
+              : `${kpis.openDeals} open deals`
+          }
+        />
+        <StatTile label="Weighted forecast" value={money(kpis.weightedForecast)} hint="Value × stage probability" />
+        <StatTile label="Won this month" value={money(kpis.wonThisMonth)} hint={`${money(kpis.wonLastMonth)} last month`} />
         <StatTile
           label="Win rate (90 days)"
           value={kpis.winRate === null ? "—" : `${Math.round(kpis.winRate * 100)}%`}
@@ -47,29 +62,53 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-5">
-        <Card title="Won revenue by month" className="lg:col-span-3">
-          <MonthlyWonChart data={monthly} />
+        <Card title={`Won revenue by month (${currency})`} className="lg:col-span-3">
+          <MonthlyWonChart data={monthly} currency={currency} />
           <ChartTable
             caption="Won revenue by month"
             headers={["Month", "Won revenue", "Deals"]}
-            rows={monthly.map((m) => [m.month, formatCurrency(m.won), m.deals])}
+            rows={monthly.map((m) => [m.month, formatCurrency(m.won, currency), m.deals])}
           />
         </Card>
         <Card title="Open pipeline by stage" className="lg:col-span-2">
-          <PipelineStageChart data={stages} />
+          <PipelineStageChart data={stages} currency={currency} />
           <ChartTable
             caption="Open pipeline by stage"
             headers={["Stage", "Deals", "Value"]}
-            rows={stages.map((s) => [s.stage, s.count, formatCurrency(s.value)])}
+            rows={stages.map((s) => [s.stage, s.count, formatCurrency(s.value, currency)])}
           />
         </Card>
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-5">
-        <Card title="My upcoming tasks" className="lg:col-span-3" actions={<ButtonLink href="/tasks" variant="ghost">All tasks</ButtonLink>}>
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <Card title="Deals needing attention" actions={<ButtonLink href="/deals" variant="ghost">Pipeline</ButtonLink>}>
+          {attention.length === 0 ? (
+            <EmptyState>Every open deal looks healthy.</EmptyState>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {attention.map((deal) => (
+                <li key={deal.id} className="py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link href={`/deals/${deal.id}`} className="min-w-0 text-sm font-medium text-slate-900 hover:text-indigo-600">
+                      {deal.title}
+                    </Link>
+                    <HealthBadge health={deal.health} />
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {deal.health.reasons[0]}
+                    {deal.health.reasons.length > 1 && ` · +${deal.health.reasons.length - 1} more`}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="My upcoming tasks" actions={<ButtonLink href="/tasks" variant="ghost">All tasks</ButtonLink>}>
           <ActivityList activities={upcomingTasks} emptyText="No open tasks with a due date." />
         </Card>
-        <Card title={isRep ? "My wins, last 6 months" : "Top performers, last 6 months"} className="lg:col-span-2">
+
+        <Card title={isRep ? "My wins, last 6 months" : "Top performers, last 6 months"}>
           {leaderboard.length === 0 ? (
             <EmptyState>No won deals yet.</EmptyState>
           ) : (
@@ -96,7 +135,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
                     <td className="w-2/5 py-2 pr-3">
                       <InlineBar ratio={topWon ? row.won / topWon : 0} label={`${row.name} relative to top performer`} />
                     </td>
-                    <td className="py-2 text-right tabular-nums text-slate-800">{formatCurrency(row.won, "USD", true)}</td>
+                    <td className="py-2 text-right tabular-nums text-slate-800">{money(row.won)}</td>
                   </tr>
                 ))}
               </tbody>

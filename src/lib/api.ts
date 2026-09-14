@@ -1,17 +1,34 @@
 import "server-only";
 import { apiError, authenticateApiRequest } from "@/lib/api-auth";
-import { CrmError, errorToResponse } from "@/lib/errors";
 import type { Actor } from "@/lib/crm";
+import { CrmError, errorToResponse } from "@/lib/errors";
+import { hit, retryAfterSeconds } from "@/lib/rate-limit";
 
-/** Wraps a REST handler with API-key auth and uniform error responses. */
+const API_LIMIT = 300; // requests per key owner per minute
+const API_WINDOW_MS = 60_000;
+
+/** Wraps a REST handler with API-key auth, rate limiting and uniform error responses. */
 export async function withApi(req: Request, handler: (actor: Actor) => Promise<Response>) {
   const actor = await authenticateApiRequest(req);
   if (!actor) return apiError(401, "Missing or invalid API key. Send `Authorization: Bearer crm_...`.");
-  try {
-    return await handler(actor);
-  } catch (err) {
-    return errorToResponse(err);
+
+  const limit = await hit(`api:${actor.id}`, API_LIMIT, API_WINDOW_MS);
+  if (!limit.ok) {
+    return Response.json(
+      { error: "Rate limit exceeded" },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds(limit.resetAt)) } },
+    );
   }
+
+  let res: Response;
+  try {
+    res = await handler(actor);
+  } catch (err) {
+    res = errorToResponse(err);
+  }
+  res.headers.set("X-RateLimit-Limit", String(API_LIMIT));
+  res.headers.set("X-RateLimit-Remaining", String(limit.remaining));
+  return res;
 }
 
 export async function readJson(req: Request): Promise<unknown> {

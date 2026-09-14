@@ -1,15 +1,18 @@
 import "server-only";
-import { prisma } from "@/lib/prisma";
-import { ownerScope } from "@/lib/permissions";
 import { DEAL_STAGES, OPEN_STAGES } from "@/lib/constants";
 import { activityInclude, type Actor } from "@/lib/crm";
+import { env } from "@/lib/env";
+import { ownerScope } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
 import { addDays } from "@/lib/utils";
 
 const DAY = 24 * 60 * 60 * 1000;
 const sum = (values: number[]) => values.reduce((total, v) => total + v, 0);
 const isOpen = (stage: string) => (OPEN_STAGES as string[]).includes(stage);
 
-// Note: amounts are summed as-is across currencies (seed data is all USD).
+// Money totals only include deals in the reporting currency (env CURRENCY);
+// adding amounts across currencies without exchange rates would be wrong.
+const inReportingCurrency = (d: { currency: string }) => d.currency === env.CURRENCY;
 
 export async function getDashboardData(actor: Actor) {
   const scope = ownerScope(actor);
@@ -18,15 +21,15 @@ export async function getDashboardData(actor: Actor) {
   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-  const [openDeals, wonDeals, closed90, overdueTasks, newContacts, prevContacts, upcomingTasks, users] =
+  const [allOpenDeals, allWonDeals, closed90, overdueTasks, newContacts, prevContacts, upcomingTasks, users] =
     await Promise.all([
       prisma.deal.findMany({
         where: { ...scope, stage: { in: OPEN_STAGES } },
-        select: { value: true, probability: true, stage: true },
+        select: { value: true, probability: true, stage: true, currency: true },
       }),
       prisma.deal.findMany({
         where: { ...scope, stage: "WON", closedAt: { gte: sixMonthsAgo } },
-        select: { value: true, closedAt: true, ownerId: true },
+        select: { value: true, closedAt: true, ownerId: true, currency: true },
       }),
       prisma.deal.groupBy({
         by: ["stage"],
@@ -47,6 +50,8 @@ export async function getDashboardData(actor: Actor) {
       prisma.user.findMany({ select: { id: true, name: true } }),
     ]);
 
+  const openDeals = allOpenDeals.filter(inReportingCurrency);
+  const wonDeals = allWonDeals.filter(inReportingCurrency);
   const won90 = closed90.find((g) => g.stage === "WON")?._count._all ?? 0;
   const lost90 = closed90.find((g) => g.stage === "LOST")?._count._all ?? 0;
   const closedAt = (d: { closedAt: Date | null }) => d.closedAt ?? now;
@@ -85,9 +90,11 @@ export async function getDashboardData(actor: Actor) {
   }
 
   return {
+    currency: env.CURRENCY,
     kpis: {
       pipelineValue: sum(openDeals.map((d) => d.value)),
-      openDeals: openDeals.length,
+      openDeals: allOpenDeals.length,
+      excludedOpenDeals: allOpenDeals.length - openDeals.length,
       weightedForecast: sum(openDeals.map((d) => (d.value * d.probability) / 100)),
       wonThisMonth: sum(wonDeals.filter((d) => closedAt(d) >= startOfMonth).map((d) => d.value)),
       wonLastMonth: sum(
@@ -113,6 +120,8 @@ export const REPORT_PERIODS = [
   { days: 365, label: "Last 12 months" },
 ] as const;
 
+type ReportDeal = { value: number; stage: string; ownerId: string | null; createdAt: Date; closedAt: Date | null; currency: string };
+
 export async function getReportsData(actor: Actor, days: number) {
   const scope = ownerScope(actor);
   const since = addDays(new Date(), -days);
@@ -120,7 +129,7 @@ export async function getReportsData(actor: Actor, days: number) {
   const [deals, contactGroups, users] = await Promise.all([
     prisma.deal.findMany({
       where: { ...scope, OR: [{ stage: { in: OPEN_STAGES } }, { closedAt: { gte: since } }] },
-      select: { value: true, stage: true, ownerId: true, createdAt: true, closedAt: true },
+      select: { value: true, stage: true, ownerId: true, createdAt: true, closedAt: true, currency: true },
     }),
     prisma.contact.groupBy({
       by: ["source", "status"],
@@ -134,19 +143,20 @@ export async function getReportsData(actor: Actor, days: number) {
     }),
   ]);
 
-  const summarize = (subset: typeof deals) => {
+  const summarize = (subset: ReportDeal[]) => {
     const open = subset.filter((d) => isOpen(d.stage));
     const won = subset.filter((d) => d.stage === "WON" && d.closedAt && d.closedAt >= since);
     const lost = subset.filter((d) => d.stage === "LOST" && d.closedAt && d.closedAt >= since);
-    const wonValue = sum(won.map((d) => d.value));
+    const wonInCurrency = won.filter(inReportingCurrency);
+    const wonValue = sum(wonInCurrency.map((d) => d.value));
     return {
       openCount: open.length,
-      pipeline: sum(open.map((d) => d.value)),
+      pipeline: sum(open.filter(inReportingCurrency).map((d) => d.value)),
       wonCount: won.length,
       wonValue,
       lostCount: lost.length,
       winRate: won.length + lost.length > 0 ? won.length / (won.length + lost.length) : null,
-      avgDeal: won.length ? wonValue / won.length : null,
+      avgDeal: wonInCurrency.length ? wonValue / wonInCurrency.length : null,
       cycleDays: won.length
         ? sum(won.map((d) => (d.closedAt!.getTime() - d.createdAt.getTime()) / DAY)) / won.length
         : null,
@@ -168,6 +178,8 @@ export async function getReportsData(actor: Actor, days: number) {
   }
 
   return {
+    currency: env.CURRENCY,
+    excludedDeals: deals.filter((d) => !inReportingCurrency(d)).length,
     totals: summarize(deals),
     reps,
     sources: [...sources.values()]

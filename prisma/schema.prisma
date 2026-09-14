@@ -1,14 +1,16 @@
-// Enum-like fields are stored as String so the schema stays portable between
-// SQLite (local dev) and PostgreSQL (production). Allowed values live in
-// src/lib/constants.ts. To switch to Postgres, change `provider` and DATABASE_URL.
+// PostgreSQL schema. Enum-like fields (role, stage, status…) are plain strings
+// validated in src/lib/validation.ts, so allowed values can evolve without a
+// database migration. Allowed values live in src/lib/constants.ts.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled connection (e.g. Neon pooler) at runtime
+  directUrl = env("DIRECT_URL") // direct connection for migrations
 }
 
 model User {
@@ -26,6 +28,7 @@ model User {
   deals      Deal[]     @relation("DealOwner")
   activities Activity[] @relation("ActivityOwner")
   apiKeys    ApiKey[]
+  auditLogs  AuditLog[]
 }
 
 model Company {
@@ -58,7 +61,7 @@ model Contact {
   title     String?
   status    String   @default("LEAD") // LEAD | PROSPECT | CUSTOMER | CHURNED
   source    String?
-  tags      String   @default("") // comma-separated
+  tags      String   @default("") // comma-separated, normalized lowercase
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   ownerId   String?
@@ -83,6 +86,8 @@ model Deal {
   probability   Int       @default(10)
   expectedClose DateTime?
   closedAt      DateTime?
+  aiInsights    Json? // latest AI assistant output (see src/lib/ai.ts)
+  aiInsightsAt  DateTime?
   companyId     String?
   company       Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contactId     String?
@@ -142,6 +147,8 @@ model Webhook {
   secret          String
   active          Boolean   @default(true)
   lastStatus      Int?
+  lastError       String?
+  failureCount    Int       @default(0) // consecutive failed deliveries; auto-disabled at 10
   lastDeliveredAt DateTime?
   createdAt       DateTime  @default(now())
 }
@@ -168,4 +175,27 @@ model EmailLog {
   createdAt DateTime @default(now())
 
   @@index([contactId])
+}
+
+/// Who changed what, and when. Written by the service layer (src/lib/crm.ts).
+model AuditLog {
+  id         String   @id @default(cuid())
+  entityType String // contact | company | deal | activity
+  entityId   String
+  action     String // created | updated | deleted | stage_changed | completed | reopened
+  summary    String?
+  changes    Json? // { field: { from, to } }
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([createdAt])
+}
+
+/// Fixed-window counters for rate limiting (works across serverless instances).
+model RateLimit {
+  key     String   @id
+  count   Int      @default(0)
+  resetAt DateTime
 }

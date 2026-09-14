@@ -7,6 +7,8 @@ import { DealList } from "@/components/deal-list";
 import { ActivityFields } from "@/components/forms/activity-fields";
 import { ContactFields } from "@/components/forms/contact-fields";
 import { Badge, ButtonLink, Card, PageHeader, StatusBadge } from "@/components/ui";
+import { AuditHistory } from "@/components/audit-history";
+import { listAuditEntries } from "@/lib/audit";
 import { companyOptions, getContact, userOptions } from "@/lib/crm";
 import { can } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
@@ -22,9 +24,10 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
   const contact = await getContact(user, id);
   if (!contact) notFound();
 
-  const [companies, owners] = await Promise.all([
+  const [companies, owners, history] = await Promise.all([
     companyOptions(user),
     can.reassignOwner(user) ? userOptions() : undefined,
+    listAuditEntries("contact", contact.id),
   ]);
   const subtitle = [contact.title, contact.company?.name].filter(Boolean).join(" at ");
 
@@ -92,6 +95,9 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
           </Card>
           <Card title="Deals">
             <DealList deals={contact.deals} />
+          </Card>
+          <Card title="History">
+            <AuditHistory entries={history} labels={{ title: "job title" }} />
           </Card>
         </div>
       </div>

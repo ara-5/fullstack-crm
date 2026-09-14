@@ -18,11 +18,11 @@ export function StatTile({
 }) {
   const good = delta ? (delta.value >= 0) === (delta.upIsGood ?? true) : false;
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-surface p-4 shadow-sm">
       <p className="text-xs font-medium text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{value}</p>
       {delta && delta.value !== 0 && (
-        <p className={cx("mt-1 text-xs font-medium", good ? "text-[#006300]" : "text-red-700")}>
+        <p className={cx("mt-1 text-xs font-medium", good ? "text-emerald-700" : "text-red-700")}>
           {delta.value > 0 ? "▲ +" : "▼ "}
           {delta.value.toLocaleString("en-US")} {delta.label}
         </p>
@@ -36,8 +36,15 @@ export function StatTile({
 export function InlineBar({ ratio, label }: { ratio: number; label: string }) {
   const pct = Math.max(0, Math.min(1, ratio)) * 100;
   return (
-    <div className="h-1.5 w-full min-w-16 rounded-full bg-[#cde2fb]" role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
-      <div className="h-1.5 rounded-full bg-[#2a78d6]" style={{ width: `${pct}%` }} />
+    <div
+      className="h-1.5 w-full min-w-16 rounded-full bg-viz-track"
+      role="meter"
+      aria-valuenow={Math.round(pct)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={label}
+    >
+      <div className="h-1.5 rounded-full bg-viz-series" style={{ width: `${pct}%` }} />
     </div>
   );
 }

@@ -13,6 +13,7 @@ export function DealFields({
   contacts,
   owners,
   defaults,
+  defaultCurrency = "USD",
   compact = false,
 }: {
   deal?: Deal;
@@ -20,8 +21,10 @@ export function DealFields({
   contacts: Option[];
   owners?: Option[];
   defaults?: { companyId?: string; contactId?: string; ownerId?: string };
+  defaultCurrency?: string;
   compact?: boolean;
 }) {
+  const currencies = CURRENCIES.includes(defaultCurrency) ? CURRENCIES : [defaultCurrency, ...CURRENCIES];
   return (
     <div className={cx("grid gap-4", !compact && "sm:grid-cols-2")}>
       <Field label="Title" name="title" className={compact ? undefined : "sm:col-span-2"}>
@@ -32,8 +35,8 @@ export function DealFields({
           <Input type="number" name="value" min={0} step="any" defaultValue={deal?.value ?? ""} />
         </Field>
         <Field label="Currency" name="currency">
-          <Select name="currency" defaultValue={deal?.currency ?? "USD"}>
-            {CURRENCIES.map((c) => (
+          <Select name="currency" defaultValue={deal?.currency ?? defaultCurrency}>
+            {currencies.map((c) => (
               <option key={c}>{c}</option>
             ))}
           </Select>

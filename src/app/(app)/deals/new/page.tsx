@@ -3,6 +3,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { DealFields } from "@/components/forms/deal-fields";
 import { ButtonLink, Card, PageHeader } from "@/components/ui";
 import { companyOptions, contactOptions, userOptions } from "@/lib/crm";
+import { env } from "@/lib/env";
 import { can } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { first } from "@/lib/utils";
@@ -25,6 +26,7 @@ export default async function NewDealPage({ searchParams }: PageProps<"/deals/ne
       <Card className="max-w-3xl">
         <ActionForm action={createDealAction}>
           <DealFields
+            defaultCurrency={env.CURRENCY}
             companies={companies}
             contacts={contacts}
             owners={owners}

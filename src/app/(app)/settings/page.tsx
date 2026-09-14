@@ -6,7 +6,12 @@ import { CRM_EVENTS, ROLES, titleCase } from "@/lib/constants";
 import { can } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import Link from "next/link";
+import { listRecentAudit } from "@/lib/audit";
+import { env, features } from "@/lib/env";
 import { formatDate, formatDateTime } from "@/lib/utils";
+
+const ENTITY_PATHS: Record<string, string> = { contact: "contacts", company: "companies", deal: "deals" };
 import {
   changePasswordAction,
   createApiKeyAction,
@@ -36,7 +41,7 @@ export default async function SettingsPage() {
   const user = await requireUser();
   const isAdmin = can.manageUsers(user);
 
-  const [apiKeys, users, webhooks] = await Promise.all([
+  const [apiKeys, users, webhooks, recentChanges] = await Promise.all([
     prisma.apiKey.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" } }),
     isAdmin
       ? prisma.user.findMany({
@@ -45,6 +50,7 @@ export default async function SettingsPage() {
         })
       : Promise.resolve([]),
     isAdmin ? prisma.webhook.findMany({ orderBy: { createdAt: "desc" } }) : Promise.resolve([]),
+    isAdmin ? listRecentAudit(20) : Promise.resolve([]),
   ]);
 
   return (
@@ -53,6 +59,9 @@ export default async function SettingsPage() {
       <div className="space-y-6">
         <div className="grid gap-6 lg:grid-cols-2">
           <Card title="Change password">
+            {env.DEMO_MODE ? (
+              <p className="text-sm text-slate-500">Password changes are disabled in the public demo.</p>
+            ) : (
             <ActionForm action={changePasswordAction} resetOnSuccess className="space-y-3">
               <Field label="Current password" name="currentPassword">
                 <Input type="password" name="currentPassword" autoComplete="current-password" required />
@@ -64,6 +73,7 @@ export default async function SettingsPage() {
                 <SubmitButton>Update password</SubmitButton>
               </div>
             </ActionForm>
+            )}
           </Card>
 
           <Card title="Your API keys">
@@ -123,7 +133,7 @@ export default async function SettingsPage() {
                         <p className="text-xs text-slate-500">{u.email}</p>
                       </td>
                       <td className={td}>
-                        {isSelf ? (
+                        {isSelf || env.DEMO_MODE ? (
                           <StatusBadge value={u.role} />
                         ) : (
                           <form action={updateUserRoleAction.bind(null, u.id)} className="flex items-center gap-2">
@@ -144,7 +154,7 @@ export default async function SettingsPage() {
                         <Badge tone={u.active ? "green" : "slate"}>{u.active ? "Active" : "Deactivated"}</Badge>
                       </td>
                       <td className={`${td} text-right`}>
-                        {!isSelf && (
+                        {!isSelf && !env.DEMO_MODE && (
                           <form action={toggleUserActiveAction.bind(null, u.id)}>
                             <Button type="submit" variant={u.active ? "danger" : "secondary"}>
                               {u.active ? "Deactivate" : "Reactivate"}
@@ -157,6 +167,7 @@ export default async function SettingsPage() {
                 })}
               </tbody>
             </Table>
+            {!env.DEMO_MODE && (
             <div className="border-t border-slate-100 p-4">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">Add a user</h3>
               <ActionForm action={createUserAction} resetOnSuccess>
@@ -183,11 +194,17 @@ export default async function SettingsPage() {
                 </div>
               </ActionForm>
             </div>
+            )}
           </Card>
         )}
 
         {isAdmin && (
           <Card title="Webhooks">
+            {!features.webhooks && (
+              <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Webhook delivery is disabled in the public demo.
+              </p>
+            )}
             <p className="mb-3 text-sm text-slate-500">
               We POST JSON to your URL when events happen. Each request carries an{" "}
               <code className="font-mono text-xs">X-CRM-Signature: sha256=…</code> header: an HMAC-SHA256 of the raw
@@ -206,6 +223,8 @@ export default async function SettingsPage() {
                         {w.lastDeliveredAt
                           ? `last delivery ${formatDateTime(w.lastDeliveredAt)} (${w.lastStatus === 0 ? "network error" : `HTTP ${w.lastStatus}`})`
                           : "no deliveries yet"}
+                        {w.lastError && ` · ${w.lastError}`}
+                        {!w.active && w.failureCount >= 10 && " · paused after repeated failures"}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -245,11 +264,48 @@ export default async function SettingsPage() {
           </Card>
         )}
 
+        {isAdmin && (
+          <Card title="Recent changes" padded={false}>
+            {recentChanges.length === 0 ? (
+              <div className="p-4">
+                <EmptyState>No changes recorded yet.</EmptyState>
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {recentChanges.map((entry) => {
+                  const base = ENTITY_PATHS[entry.entityType];
+                  const href = entry.action !== "deleted" && base ? `/${base}/${entry.entityId}` : null;
+                  return (
+                    <li key={entry.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+                      <span className="min-w-0 text-slate-700">
+                        <span className="font-medium text-slate-900">{entry.user?.name ?? "System"}</span>{" "}
+                        {entry.action.replace("_", " ")} {entry.entityType}{" "}
+                        {href ? (
+                          <Link href={href} className="text-indigo-700 hover:underline">
+                            {entry.summary ?? "record"}
+                          </Link>
+                        ) : (
+                          entry.summary
+                        )}
+                      </span>
+                      <span className="text-xs text-slate-500">{formatDateTime(entry.createdAt)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+        )}
+
         <Card title="REST API" padded={false}>
           <div className="p-4 text-sm text-slate-600">
             <p>
               Authenticate with an API key from above. Responses are JSON; validation errors return <code>422</code>{" "}
-              with details. Keys only see the records their owner can see.
+              with details. Keys only see the records their owner can see. Try requests live in the{" "}
+              <Link href="/api-docs" className="font-medium text-indigo-700 underline">
+                interactive API reference
+              </Link>
+              .
             </p>
             <pre className="mt-3 overflow-x-auto rounded-md bg-slate-900 p-3 font-mono text-xs text-slate-100">
 {`curl -H "Authorization: Bearer crm_…" \\

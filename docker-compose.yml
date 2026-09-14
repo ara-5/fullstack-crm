@@ -1,0 +1,56 @@
+# Local PostgreSQL for development and tests:
+#   docker compose up -d              start just the database (port 5433)
+#
+# Run the whole app in containers (database + migrations + demo data + app on :3000):
+#   docker compose --profile app up --build
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: fullstack-crm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: crm
+      POSTGRES_DB: crm
+    ports:
+      - "5433:5432" # 5433 on the host avoids clashing with another local Postgres
+    volumes:
+      - crm-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    profiles: [app]
+    build:
+      context: .
+      target: builder
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed"
+    environment:
+      DATABASE_URL: postgresql://crm:crm@db:5432/crm
+      DIRECT_URL: postgresql://crm:crm@db:5432/crm
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    profiles: [app]
+    build:
+      context: .
+      target: runner
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://crm:crm@db:5432/crm
+      DIRECT_URL: postgresql://crm:crm@db:5432/crm
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-local-docker-secret-0000}
+      DEMO_MODE: "true"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  crm-db:

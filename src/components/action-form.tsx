@@ -63,7 +63,7 @@ export function ActionForm({
         {state.secret && (
           <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
             <p className="font-medium text-amber-900">Copy this now. It won&apos;t be shown again.</p>
-            <code className="mt-2 block break-all rounded bg-white px-2 py-1.5 font-mono text-xs text-slate-800">
+            <code className="mt-2 block break-all rounded bg-surface px-2 py-1.5 font-mono text-xs text-slate-800">
               {state.secret}
             </code>
           </div>
@@ -95,7 +95,7 @@ export function Field({
       {error ? (
         <span className="mt-1 block text-xs text-red-600">{error}</span>
       ) : (
-        hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>
+        hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>
       )}
     </label>
   );
@@ -106,15 +106,18 @@ export function SubmitButton({
   variant,
   className,
   pendingText = "Saving…",
+  label,
 }: {
   children: ReactNode;
   variant?: ButtonVariant;
   className?: string;
   pendingText?: string;
+  /** Accessible name when the visible text is too short to stand alone. */
+  label?: string;
 }) {
   const { pending } = useContext(FormContext);
   return (
-    <Button type="submit" variant={variant} className={className} disabled={pending}>
+    <Button type="submit" variant={variant} className={className} disabled={pending} aria-label={label}>
       {pending ? pendingText : children}
     </Button>
   );

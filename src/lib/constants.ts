@@ -3,6 +3,15 @@
 export const ROLES = ["ADMIN", "MANAGER", "REP"] as const;
 export type Role = (typeof ROLES)[number];
 
+// Public demo credentials (seeded data only; shown on the login page in demo mode).
+export const DEMO_PASSWORD = "Password123!";
+export const DEMO_ACCOUNTS: { name: string; email: string; role: Role }[] = [
+  { name: "Ada Admin", email: "admin@crm.local", role: "ADMIN" },
+  { name: "Max Manager", email: "manager@crm.local", role: "MANAGER" },
+  { name: "Riley Rep", email: "rep@crm.local", role: "REP" },
+  { name: "Sam Seller", email: "sam@crm.local", role: "REP" },
+];
+
 export const DEAL_STAGES = [
   { id: "LEAD", label: "Lead", probability: 10 },
   { id: "QUALIFIED", label: "Qualified", probability: 25 },

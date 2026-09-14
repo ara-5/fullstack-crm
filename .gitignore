@@ -34,9 +34,15 @@ yarn-error.log*
 .env*
 !.env.example
 
-# local SQLite database
+# legacy local SQLite database
 /prisma/*.db
 /prisma/*.db-journal
+
+# test output
+/playwright-report/
+/test-results/
+/blob-report/
+/coverage/
 
 # vercel
 .vercel

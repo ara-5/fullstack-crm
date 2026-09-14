@@ -42,7 +42,7 @@ export function ActivityList({
                   aria-label={done ? `Mark "${a.subject}" as not done` : `Mark "${a.subject}" as done`}
                   className={cx(
                     "mt-0.5 flex h-5 w-5 items-center justify-center rounded border text-xs transition",
-                    done ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white hover:border-indigo-500",
+                    done ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-400 bg-surface hover:border-indigo-500",
                   )}
                 >
                   {done ? "✓" : ""}
@@ -52,7 +52,7 @@ export function ActivityList({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>{titleCase(a.type)}</Badge>
-                <span className={cx("text-sm font-medium text-slate-900", done && !isNote && "text-slate-400 line-through")}>
+                <span className={cx("text-sm font-medium text-slate-900", done && !isNote && "text-slate-500 line-through")}>
                   {a.subject}
                 </span>
                 {!isNote && !done && <StatusBadge value={a.priority} />}

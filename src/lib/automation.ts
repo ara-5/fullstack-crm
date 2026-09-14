@@ -1,27 +1,14 @@
 import "server-only";
 import { after } from "next/server";
-import type { Activity, AutomationRule, Contact, Deal } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { sendEmail } from "@/lib/email";
-import { deliverWebhooks } from "@/lib/webhooks";
+import type { AutomationRule } from "@prisma/client";
+import { interpolate, matches, type Conditions, type EventPayload } from "@/lib/automation-rules";
 import type { CrmEvent } from "@/lib/constants";
+import { sendEmail } from "@/lib/email";
+import { prisma } from "@/lib/prisma";
 import { addDays, parseJson } from "@/lib/utils";
+import { deliverWebhooks } from "@/lib/webhooks";
 
-export type EventPayload = {
-  actorId: string;
-  contact?: Contact | null;
-  deal?: Deal | null;
-  activity?: Activity | null;
-  fromStage?: string;
-  toStage?: string;
-};
-
-type Conditions = {
-  toStage?: string;
-  fromStage?: string;
-  minValue?: number;
-  contactStatus?: string;
-};
+export type { EventPayload } from "@/lib/automation-rules";
 
 type ActionConfig = {
   subject?: string;
@@ -43,9 +30,7 @@ export async function emitEvent(event: CrmEvent, payload: EventPayload) {
   } catch (err) {
     console.error(`[automation] failed while handling ${event}:`, err);
   }
-
-  const { actorId, ...data } = payload;
-  after(() => deliverWebhooks(event, { ...data, actorId }));
+  after(() => deliverWebhooks(event, payload));
 }
 
 async function runAutomations(event: CrmEvent, payload: EventPayload) {
@@ -65,23 +50,6 @@ async function runAutomations(event: CrmEvent, payload: EventPayload) {
       data: { runCount: { increment: 1 }, lastRunAt: new Date() },
     });
   }
-}
-
-export function matches(c: Conditions, p: EventPayload) {
-  if (c.toStage && c.toStage !== p.toStage) return false;
-  if (c.fromStage && c.fromStage !== p.fromStage) return false;
-  if (c.minValue != null && (p.deal?.value ?? 0) < Number(c.minValue)) return false;
-  if (c.contactStatus && p.contact?.status !== c.contactStatus) return false;
-  return true;
-}
-
-/** Replaces {{contact.firstName}}, {{deal.title}}, etc. with payload values. */
-export function interpolate(template: string, p: EventPayload) {
-  return template.replace(/\{\{\s*(contact|deal|activity)\.(\w+)\s*\}\}/g, (_, obj: string, field: string) => {
-    const source = p[obj as "contact" | "deal" | "activity"] as Record<string, unknown> | null | undefined;
-    const value = source?.[field];
-    return value == null ? "" : String(value);
-  });
 }
 
 async function executeAction(rule: AutomationRule, p: EventPayload) {

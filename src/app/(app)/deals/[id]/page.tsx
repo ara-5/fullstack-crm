@@ -3,12 +3,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ActivityList } from "@/components/activity-list";
+import { AuditHistory } from "@/components/audit-history";
 import { ConfirmButton } from "@/components/confirm-button";
+import { DealInsightsCard } from "@/components/deal-insights";
 import { ActivityFields } from "@/components/forms/activity-fields";
 import { DealFields } from "@/components/forms/deal-fields";
 import { Card, PageHeader } from "@/components/ui";
+import type { DealInsights } from "@/lib/ai";
+import { listAuditEntries } from "@/lib/audit";
 import { DEAL_STAGES } from "@/lib/constants";
 import { companyOptions, contactOptions, getDeal, userOptions } from "@/lib/crm";
+import { features } from "@/lib/env";
 import { can } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { cx, formatCurrency, formatDate, fullName } from "@/lib/utils";
@@ -23,10 +28,11 @@ export default async function DealPage({ params }: PageProps<"/deals/[id]">) {
   const deal = await getDeal(user, id);
   if (!deal) notFound();
 
-  const [companies, contacts, owners] = await Promise.all([
+  const [companies, contacts, owners, history] = await Promise.all([
     companyOptions(user),
     contactOptions(user),
     can.reassignOwner(user) ? userOptions() : undefined,
+    listAuditEntries("deal", deal.id),
   ]);
 
   return (
@@ -76,7 +82,7 @@ export default async function DealPage({ params }: PageProps<"/deals/[id]">) {
                 "rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition",
                 deal.stage === s.id
                   ? "bg-indigo-600 text-white ring-indigo-600"
-                  : "bg-white text-slate-600 ring-slate-300 hover:bg-slate-50",
+                  : "bg-surface text-slate-600 ring-slate-300 hover:bg-slate-50",
               )}
             >
               {s.label}
@@ -101,15 +107,26 @@ export default async function DealPage({ params }: PageProps<"/deals/[id]">) {
           <Card title="Timeline">
             <ActivityList activities={deal.activities} emptyText="No activity logged yet." />
           </Card>
+          <DealInsightsCard
+            dealId={deal.id}
+            aiEnabled={features.ai}
+            insights={deal.aiInsights as DealInsights | null}
+            generatedAt={deal.aiInsightsAt}
+          />
         </div>
-        <Card title="Details" className="self-start">
-          <ActionForm action={updateDealAction.bind(null, deal.id)}>
-            <DealFields deal={deal} companies={companies} contacts={contacts} owners={owners} compact />
-            <div className="mt-4 flex justify-end">
-              <SubmitButton>Save changes</SubmitButton>
-            </div>
-          </ActionForm>
-        </Card>
+        <div className="space-y-6">
+          <Card title="Details">
+            <ActionForm action={updateDealAction.bind(null, deal.id)}>
+              <DealFields deal={deal} companies={companies} contacts={contacts} owners={owners} compact />
+              <div className="mt-4 flex justify-end">
+                <SubmitButton>Save changes</SubmitButton>
+              </div>
+            </ActionForm>
+          </Card>
+          <Card title="History">
+            <AuditHistory entries={history} labels={{ value: "deal value" }} />
+          </Card>
+        </div>
       </div>
     </>
   );
