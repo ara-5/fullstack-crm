@@ -97,4 +97,12 @@ Search uses `contains`. That is case-insensitive on SQLite but case-sensitive on
 
 ## License
 
-[MIT](LICENSE) © 2026 Ara
+Copyright (C) 2026 Ara
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. See [LICENSE](LICENSE) for the full text.
+
+In short: you may use, modify and self-host this CRM. If you run a modified version as a network
+service (for example, a hosted SaaS), you must make your modified source code available to its
+users under the same license.
