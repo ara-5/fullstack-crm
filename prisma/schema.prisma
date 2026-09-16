@@ -14,21 +14,27 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         String   @default("REP") // ADMIN | MANAGER | REP
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  name                   String
+  email                  String   @unique
+  passwordHash           String
+  role                   String   @default("REP") // ADMIN | MANAGER | REP
+  active                 Boolean  @default(true)
+  twoFactorSecret        String? // base32; set as soon as setup begins, only trusted once twoFactorEnabled
+  twoFactorEnabled       Boolean  @default(false)
+  twoFactorRecoveryCodes Json? // array of bcrypt hashes, each usable once
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
-  companies  Company[]  @relation("CompanyOwner")
-  contacts   Contact[]  @relation("ContactOwner")
-  deals      Deal[]     @relation("DealOwner")
-  activities Activity[] @relation("ActivityOwner")
-  apiKeys    ApiKey[]
-  auditLogs  AuditLog[]
+  companies     Company[]      @relation("CompanyOwner")
+  contacts      Contact[]      @relation("ContactOwner")
+  deals         Deal[]         @relation("DealOwner")
+  activities    Activity[]     @relation("ActivityOwner")
+  apiKeys       ApiKey[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  presences     Presence[]
+  savedViews    SavedView[]
 }
 
 model Company {
@@ -198,4 +204,48 @@ model RateLimit {
   key     String   @id
   count   Int      @default(0)
   resetAt DateTime
+}
+
+/// In-app notifications (assignment, deal outcome, automation-created tasks).
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String // assigned | deal_won | deal_lost | task_assigned
+  title      String
+  body       String?
+  entityType String?
+  entityId   String?
+  link       String?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, read, createdAt])
+}
+
+/// Who's looking at a record right now, refreshed by a client heartbeat.
+/// Rows older than the active window are ignored by readers, not deleted eagerly.
+model Presence {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entityType String
+  entityId   String
+  lastSeenAt DateTime @default(now())
+
+  @@unique([userId, entityType, entityId])
+  @@index([entityType, entityId, lastSeenAt])
+}
+
+/// A saved filter set for a list page (contacts or companies), per user.
+model SavedView {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entity    String // contacts | companies
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, entity])
 }

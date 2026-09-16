@@ -7,6 +7,7 @@ import { env } from "@/lib/env";
 import { getCurrentUser } from "@/lib/session";
 import { first, safePath } from "@/lib/utils";
 import { loginAction } from "./actions";
+import { TwoFactorField } from "./two-factor-field";
 
 export const metadata: Metadata = { title: "Sign in" };
 
@@ -34,6 +35,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             <Field label="Password" name="password">
               <Input type="password" name="password" autoComplete="current-password" required />
             </Field>
+            <TwoFactorField />
             <SubmitButton className="w-full" pendingText="Signing in…">
               Sign in
             </SubmitButton>

@@ -8,6 +8,7 @@ import { ActivityFields } from "@/components/forms/activity-fields";
 import { ContactFields } from "@/components/forms/contact-fields";
 import { Badge, ButtonLink, Card, PageHeader, StatusBadge } from "@/components/ui";
 import { AuditHistory } from "@/components/audit-history";
+import { PresenceBar } from "@/components/presence-bar";
 import { listAuditEntries } from "@/lib/audit";
 import { companyOptions, getContact, userOptions } from "@/lib/crm";
 import { can } from "@/lib/permissions";
@@ -53,6 +54,7 @@ export default async function ContactPage({ params }: PageProps<"/contacts/[id]"
           </>
         }
       />
+      <PresenceBar entityType="contact" entityId={contact.id} />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card title="Log activity">

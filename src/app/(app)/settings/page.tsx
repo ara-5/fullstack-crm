@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ActionForm, Field, SubmitButton } from "@/components/action-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select, StatusBadge, Table, td, th } from "@/components/ui";
+import { TwoFactorSettings } from "@/components/two-factor-settings";
 import { CRM_EVENTS, ROLES, titleCase } from "@/lib/constants";
 import { can } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -41,7 +42,7 @@ export default async function SettingsPage() {
   const user = await requireUser();
   const isAdmin = can.manageUsers(user);
 
-  const [apiKeys, users, webhooks, recentChanges] = await Promise.all([
+  const [apiKeys, users, webhooks, recentChanges, account] = await Promise.all([
     prisma.apiKey.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" } }),
     isAdmin
       ? prisma.user.findMany({
@@ -51,6 +52,7 @@ export default async function SettingsPage() {
       : Promise.resolve([]),
     isAdmin ? prisma.webhook.findMany({ orderBy: { createdAt: "desc" } }) : Promise.resolve([]),
     isAdmin ? listRecentAudit(20) : Promise.resolve([]),
+    prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { twoFactorEnabled: true } }),
   ]);
 
   return (
@@ -107,6 +109,10 @@ export default async function SettingsPage() {
             </ActionForm>
           </Card>
         </div>
+
+        <Card title="Two-factor authentication">
+          <TwoFactorSettings enabled={account.twoFactorEnabled} />
+        </Card>
 
         {isAdmin && (
           <Card title="Team members" padded={false}>

@@ -9,6 +9,11 @@ type FormAction = (formData: FormData) => Promise<ActionState | void>;
 
 const FormContext = createContext<{ state: ActionState; pending: boolean }>({ state: {}, pending: false });
 
+/** Reads the enclosing ActionForm's result, e.g. to conditionally reveal a field. */
+export function useFormState() {
+  return useContext(FormContext);
+}
+
 /**
  * Form wrapper for Server Actions that shows field errors and notices.
  * Submits manually (instead of <form action>) so inputs are NOT cleared
@@ -66,6 +71,18 @@ export function ActionForm({
             <code className="mt-2 block break-all rounded bg-surface px-2 py-1.5 font-mono text-xs text-slate-800">
               {state.secret}
             </code>
+          </div>
+        )}
+        {state.secrets && state.secrets.length > 0 && (
+          <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+            <p className="font-medium text-amber-900">Save these now. Each works once, and they won&apos;t be shown again.</p>
+            <ul className="mt-2 grid grid-cols-2 gap-1.5 font-mono text-xs text-slate-800">
+              {state.secrets.map((code) => (
+                <li key={code} className="rounded bg-surface px-2 py-1.5 text-center">
+                  {code}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </FormContext.Provider>

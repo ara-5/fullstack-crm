@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Button, ButtonLink, Card, EmptyState, Input, PageHeader, Pagination, Select, StatusBadge, Table, buttonClass, td, th } from "@/components/ui";
+import { ContactsTable } from "@/components/contacts-table";
+import { SavedViews } from "@/components/saved-views";
+import { Button, ButtonLink, Card, EmptyState, Input, PageHeader, Pagination, Select, buttonClass } from "@/components/ui";
 import { CONTACT_STATUSES, titleCase } from "@/lib/constants";
-import { listContacts } from "@/lib/crm";
 import { can } from "@/lib/permissions";
+import { listContacts, userOptions } from "@/lib/crm";
+import { listSavedViews } from "@/lib/saved-views";
 import { requireUser } from "@/lib/session";
-import { first, formatDate, fullName } from "@/lib/utils";
+import { first } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Contacts" };
 
@@ -15,7 +17,11 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
   const q = first(sp.q);
   const status = first(sp.status);
   const page = Number(first(sp.page)) || 1;
-  const { items, total, pageSize } = await listContacts(user, { q, status, page });
+  const [{ items, total, pageSize }, views, owners] = await Promise.all([
+    listContacts(user, { q, status, page }),
+    listSavedViews(user.id, "contacts"),
+    can.reassignOwner(user) ? userOptions() : Promise.resolve(undefined),
+  ]);
 
   return (
     <>
@@ -35,6 +41,7 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
         }
       />
       <Card padded={false}>
+        <SavedViews entity="contacts" basePath="/contacts" current={{ q, status }} views={views} />
         <form className="flex flex-wrap gap-2 border-b border-slate-100 p-3" role="search">
           <Input name="q" defaultValue={q} placeholder="Search name, email or company" aria-label="Search contacts" className="sm:max-w-xs" />
           <Select name="status" defaultValue={status ?? ""} aria-label="Status" className="w-auto">
@@ -54,45 +61,7 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
             <EmptyState>No contacts match these filters.</EmptyState>
           </div>
         ) : (
-          <Table>
-            <thead className="bg-slate-50">
-              <tr>
-                <th className={th}>Name</th>
-                <th className={th}>Company</th>
-                <th className={th}>Email</th>
-                <th className={th}>Status</th>
-                <th className={th}>Owner</th>
-                <th className={th}>Added</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((c) => (
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td className={td}>
-                    <Link href={`/contacts/${c.id}`} className="font-medium text-slate-900 hover:text-indigo-600">
-                      {fullName(c)}
-                    </Link>
-                    {c.title && <div className="text-xs text-slate-500">{c.title}</div>}
-                  </td>
-                  <td className={td}>
-                    {c.company ? (
-                      <Link href={`/companies/${c.company.id}`} className="hover:text-indigo-600">
-                        {c.company.name}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className={td}>{c.email ?? "—"}</td>
-                  <td className={td}>
-                    <StatusBadge value={c.status} />
-                  </td>
-                  <td className={td}>{c.owner?.name ?? "—"}</td>
-                  <td className={td}>{formatDate(c.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <ContactsTable items={items} canDelete={can.deleteRecords(user)} owners={owners} />
         )}
         <Pagination page={page} pageSize={pageSize} total={total} basePath="/contacts" params={{ q, status }} />
       </Card>

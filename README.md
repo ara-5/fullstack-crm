@@ -37,7 +37,8 @@ and signed webhooks, all behind role-based access control.
 - **Command palette** (`Ctrl/⌘+K`) — fuzzy-jump to any page or record, or create a contact/company/
   deal/task, without leaving the keyboard.
 - **Dark mode** — a real second theme (not an inverted filter), remembered per browser.
-- **Auth & roles** — email/password login, rate-limited against brute force.
+- **Auth & roles** — email/password login, rate-limited against brute force, with optional
+  **two-factor authentication** (TOTP + one-time recovery codes — any authenticator app works).
   - **Admin** — everything, including users, webhooks and the audit log.
   - **Manager** — sees all records; manages automations, import/export and deletions.
   - **Rep** — sees and edits only their own records, everywhere (UI, API, exports).
@@ -46,6 +47,10 @@ and signed webhooks, all behind role-based access control.
   `{{placeholders}}`.
 - **Audit trail** — every create/update/delete/stage-change is recorded with who, when, and a
   field-level diff, visible on the record and as a live feed for admins.
+- **Notifications** — an in-app bell for assignments and deal outcomes, and a **presence
+  indicator** ("Ada is also viewing this") on any record two people have open at once.
+- **Saved views & bulk actions** — save a filtered contacts/companies list by name and reapply it
+  in one click; select multiple records to bulk-tag, bulk-reassign or bulk-delete.
 - **Import / export** — CSV import for contacts and companies (flexible header matching, per-row
   error report) and CSV export with formula-injection escaping.
 - **REST API** — `/api/v1`, authenticated with per-user API keys (stored hashed, shown once), rate
@@ -111,6 +116,11 @@ src/lib/reports.ts         dashboard & report queries
 src/lib/permissions.ts     role rules and record scoping
 src/lib/ssrf.ts            outbound-URL guard used by webhooks
 src/lib/openapi.ts         OpenAPI 3.1 spec, generated from the Zod validation schemas
+src/lib/totp.ts            pure, unit-tested TOTP + recovery codes (RFC 4226/6238, no dependency)
+src/lib/two-factor.ts      2FA login verification (TOTP or a one-time recovery code)
+src/lib/notifications.ts   in-app notifications (assignment, deal outcome, automation tasks)
+src/lib/presence.ts        "who else is viewing this" heartbeat, backed by a short-TTL table
+src/lib/saved-views.ts     named, reusable filters for the contacts/companies list pages
 src/app/(app)/…            authenticated pages (Server Components + Server Actions)
 src/app/api/v1/…           REST API (API-key auth)
 src/app/api/export/…       CSV export (session auth)
@@ -153,9 +163,12 @@ automatically after 10 consecutive failures. To verify a delivery, compute
 ## Testing
 
 ```bash
-npm test          # unit tests: validation, permissions, automation rules, deal health, SSRF guard, CSV
-npm run build && npm run test:e2e   # end-to-end: auth, RBAC, pipeline drag-and-drop, automations,
-                                     # the REST API, the command palette, dark mode, accessibility (axe)
+npm test          # unit tests: validation, permissions, automation rules, deal health, SSRF guard,
+                   # CSV, TOTP (verified against the RFC 6238 test vectors)
+npm run build && npm run test:e2e   # end-to-end: auth incl. 2FA, RBAC, pipeline drag-and-drop,
+                                     # automations, saved views, bulk actions, notifications,
+                                     # presence, the REST API, the command palette, dark mode,
+                                     # accessibility (axe)
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, typecheck, both test suites and the build on every push

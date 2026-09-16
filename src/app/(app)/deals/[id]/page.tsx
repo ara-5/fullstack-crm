@@ -6,6 +6,7 @@ import { ActivityList } from "@/components/activity-list";
 import { AuditHistory } from "@/components/audit-history";
 import { ConfirmButton } from "@/components/confirm-button";
 import { DealInsightsCard } from "@/components/deal-insights";
+import { PresenceBar } from "@/components/presence-bar";
 import { ActivityFields } from "@/components/forms/activity-fields";
 import { DealFields } from "@/components/forms/deal-fields";
 import { Card, PageHeader } from "@/components/ui";
@@ -71,6 +72,7 @@ export default async function DealPage({ params }: PageProps<"/deals/[id]">) {
           )
         }
       />
+      <PresenceBar entityType="deal" entityId={deal.id} />
 
       <nav aria-label="Deal stage" className="mb-6 flex flex-wrap gap-1.5">
         {DEAL_STAGES.map((s) => (

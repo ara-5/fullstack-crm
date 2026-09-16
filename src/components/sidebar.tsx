@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NotificationBell } from "@/components/notification-bell";
 import { ThemeToggle } from "@/components/theme";
 import type { Role } from "@/lib/constants";
 import { navFor } from "@/lib/nav";
@@ -18,10 +19,12 @@ export function Sidebar({
   user,
   logoutAction,
   sourceUrl,
+  initialUnread,
 }: {
   user: { name: string; email: string; role: Role };
   logoutAction: () => Promise<void>;
   sourceUrl: string;
+  initialUnread: number;
 }) {
   const pathname = usePathname();
   const links = navFor(user.role).map((item) => {
@@ -52,9 +55,12 @@ export function Sidebar({
   return (
     <>
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-[#0f172a] md:flex dark:border-r dark:border-[#1e293b]">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#6366f1] text-sm font-bold text-white">C</span>
-          <span className="text-base font-semibold text-white">CRM</span>
+        <div className="flex items-center justify-between gap-2 px-5 py-5">
+          <span className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#6366f1] text-sm font-bold text-white">C</span>
+            <span className="text-base font-semibold text-white">CRM</span>
+          </span>
+          <NotificationBell initialUnread={initialUnread} className="text-[#cbd5e1] hover:bg-[#1e293b] hover:text-white" />
         </div>
         <button
           type="button"
@@ -89,6 +95,7 @@ export function Sidebar({
             <button type="button" onClick={openCommandPalette} className="text-sm text-[#cbd5e1] hover:text-white">
               Search
             </button>
+            <NotificationBell initialUnread={initialUnread} className="text-[#cbd5e1] hover:text-white" />
             <ThemeToggle className="text-[#cbd5e1] hover:text-white" />
             {signOut}
           </div>

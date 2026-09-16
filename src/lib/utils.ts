@@ -51,6 +51,24 @@ export function safePath(value: unknown, fallback = "/dashboard") {
   return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") ? value : fallback;
 }
 
+const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 31536000],
+  ["month", 2592000],
+  ["day", 86400],
+  ["hour", 3600],
+  ["minute", 60],
+];
+const relativeFormatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
+
+/** "3 hours ago", "just now"... for compact UI like notifications. */
+export function timeAgo(date: Date | string) {
+  const seconds = Math.round((new Date(date).getTime() - Date.now()) / 1000);
+  for (const [unit, secondsInUnit] of RELATIVE_UNITS) {
+    if (Math.abs(seconds) >= secondsInUnit) return relativeFormatter.format(Math.round(seconds / secondsInUnit), unit);
+  }
+  return "just now";
+}
+
 export function parseJson<T extends object>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {

@@ -4,6 +4,7 @@ import type { AutomationRule } from "@prisma/client";
 import { interpolate, matches, type Conditions, type EventPayload } from "@/lib/automation-rules";
 import type { CrmEvent } from "@/lib/constants";
 import { sendEmail } from "@/lib/email";
+import { notify } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 import { addDays, parseJson } from "@/lib/utils";
 import { deliverWebhooks } from "@/lib/webhooks";
@@ -58,19 +59,31 @@ async function executeAction(rule: AutomationRule, p: EventPayload) {
 
   switch (rule.action) {
     case "CREATE_TASK": {
-      await prisma.activity.create({
+      const dealId = p.deal?.id ?? p.activity?.dealId ?? null;
+      const task = await prisma.activity.create({
         data: {
           type: "TASK",
           subject: interpolate(config.subject || `Follow up (${rule.name})`, p),
           body: config.body ? interpolate(config.body, p) : null,
           priority: config.priority ?? "MEDIUM",
           dueAt: addDays(new Date(), Number(config.dueInDays ?? 1)),
-          dealId: p.deal?.id ?? p.activity?.dealId ?? null,
+          dealId,
           contactId: p.contact?.id ?? p.activity?.contactId ?? null,
           companyId: p.deal?.companyId ?? p.contact?.companyId ?? p.activity?.companyId ?? null,
           ownerId,
         },
       });
+      if (ownerId && ownerId !== p.actorId) {
+        await notify({
+          userId: ownerId,
+          skipIfActor: p.actorId,
+          type: "task_assigned",
+          title: `New task from automation "${rule.name}": ${task.subject}`,
+          entityType: "activity",
+          entityId: task.id,
+          link: dealId ? `/deals/${dealId}` : "/tasks",
+        });
+      }
       break;
     }
     case "SEND_EMAIL": {

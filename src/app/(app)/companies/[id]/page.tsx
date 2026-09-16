@@ -9,6 +9,7 @@ import { ActivityFields } from "@/components/forms/activity-fields";
 import { CompanyFields } from "@/components/forms/company-fields";
 import { ButtonLink, Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
 import { AuditHistory } from "@/components/audit-history";
+import { PresenceBar } from "@/components/presence-bar";
 import { listAuditEntries } from "@/lib/audit";
 import { getCompany, userOptions } from "@/lib/crm";
 import { can } from "@/lib/permissions";
@@ -56,6 +57,7 @@ export default async function CompanyPage({ params }: PageProps<"/companies/[id]
           </>
         }
       />
+      <PresenceBar entityType="company" entityId={company.id} />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card title="Log activity">

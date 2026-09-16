@@ -4,15 +4,27 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { clientIp, hit, isLimited } from "@/lib/rate-limit";
+import { verifyLoginCode } from "@/lib/two-factor";
 
 const credentialsSchema = z.object({
   email: z.email(),
   password: z.string().min(1),
+  totp: z.string().optional(),
 });
 
 /** Thrown when too many failed logins were recorded for this email or IP. */
 export class TooManyLoginAttempts extends CredentialsSignin {
   code = "rate_limited";
+}
+
+/** Thrown when the account has 2FA on and no code was submitted yet. */
+export class TwoFactorRequired extends CredentialsSignin {
+  code = "totp_required";
+}
+
+/** Thrown when a submitted 2FA code (or recovery code) didn't verify. */
+export class TwoFactorInvalid extends CredentialsSignin {
+  code = "totp_invalid";
 }
 
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -53,6 +65,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             ipKey ? hit(ipKey, MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS) : null,
           ]);
           return null;
+        }
+
+        if (user.twoFactorEnabled) {
+          const code = parsed.data.totp?.trim();
+          if (!code) throw new TwoFactorRequired();
+          if (!(await verifyLoginCode(user, code))) {
+            await Promise.all([
+              hit(emailKey, MAX_FAILURES_PER_EMAIL, LOGIN_WINDOW_MS),
+              ipKey ? hit(ipKey, MAX_FAILURES_PER_IP, LOGIN_WINDOW_MS) : null,
+            ]);
+            throw new TwoFactorInvalid();
+          }
         }
 
         return { id: user.id, name: user.name, email: user.email };

@@ -5,6 +5,7 @@ import { emitEvent } from "@/lib/automation";
 import { CLOSED_STAGES, OPEN_STAGES, stageInfo, type Role } from "@/lib/constants";
 import { DEFAULT_IGNORED, diffRecords } from "@/lib/diff";
 import { CrmError, forbidden } from "@/lib/errors";
+import { notify } from "@/lib/notifications";
 import { can, ownerScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { addDays, formatCurrency, fullName } from "@/lib/utils";
@@ -272,11 +273,23 @@ export async function updateContact(actor: Actor, id: string, input: unknown) {
   if (!existing) throw new CrmError(404, "Contact not found");
   await assertLinks(actor, { companyId: rest.companyId });
 
+  const ownerPatch = await ownerForUpdate(actor, ownerId);
   const contact = await prisma.contact.update({
     where: { id },
-    data: { ...rest, tags: normalizeTags(tags), ...(await ownerForUpdate(actor, ownerId)) },
+    data: { ...rest, tags: normalizeTags(tags), ...ownerPatch },
   });
   await recordAudit({ actorId: actor.id, entityType: "contact", entityId: id, action: "updated", changes: diffRecords(existing, contact) });
+  if (ownerPatch.ownerId && ownerPatch.ownerId !== existing.ownerId) {
+    await notify({
+      userId: ownerPatch.ownerId,
+      skipIfActor: actor.id,
+      type: "assigned",
+      title: `You were assigned ${fullName(contact)}`,
+      entityType: "contact",
+      entityId: contact.id,
+      link: `/contacts/${contact.id}`,
+    });
+  }
   await emitEvent("contact.updated", { actorId: actor.id, contact });
   return contact;
 }
@@ -290,6 +303,47 @@ export async function deleteContact(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Contact not found");
   await prisma.contact.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "contact", entityId: id, action: "deleted", summary: fullName(existing) });
+}
+
+// ---------------------------------------------------------------- bulk actions (contacts)
+
+export async function bulkDeleteContacts(actor: Actor, ids: string[]) {
+  assertCanDelete(actor);
+  const rows = await prisma.contact.findMany({ where: { id: { in: ids }, ...ownerScope(actor) }, select: { id: true, firstName: true, lastName: true } });
+  if (rows.length === 0) return 0;
+  await prisma.contact.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+  await Promise.all(rows.map((r) => recordAudit({ actorId: actor.id, entityType: "contact", entityId: r.id, action: "deleted", summary: fullName(r) })));
+  return rows.length;
+}
+
+export async function bulkReassignContacts(actor: Actor, ids: string[], ownerId: string) {
+  if (!can.reassignOwner(actor)) throw forbidden();
+  await assertActiveUser(ownerId);
+  const rows = await prisma.contact.findMany({ where: { id: { in: ids }, ...ownerScope(actor) }, select: { id: true, ownerId: true } });
+  if (rows.length === 0) return 0;
+  await prisma.contact.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { ownerId } });
+  await Promise.all(
+    rows.map((r) => recordAudit({ actorId: actor.id, entityType: "contact", entityId: r.id, action: "updated", changes: { ownerId: { from: r.ownerId, to: ownerId } } })),
+  );
+  await notify({
+    userId: ownerId,
+    skipIfActor: actor.id,
+    type: "assigned",
+    title: `You were assigned ${rows.length} contact${rows.length === 1 ? "" : "s"}`,
+    entityType: "contact",
+    link: "/contacts",
+  });
+  return rows.length;
+}
+
+export async function bulkTagContacts(actor: Actor, ids: string[], tag: string) {
+  const clean = tag.trim().toLowerCase();
+  if (!clean) throw new CrmError(422, "Tag can't be empty");
+  const rows = await prisma.contact.findMany({ where: { id: { in: ids }, ...ownerScope(actor) }, select: { id: true, tags: true } });
+  await Promise.all(
+    rows.map((r) => prisma.contact.update({ where: { id: r.id }, data: { tags: normalizeTags(`${r.tags},${clean}`) } })),
+  );
+  return rows.length;
 }
 
 // ---------------------------------------------------------------- companies
@@ -359,6 +413,37 @@ export async function deleteCompany(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Company not found");
   await prisma.company.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "company", entityId: id, action: "deleted", summary: existing.name });
+}
+
+// ---------------------------------------------------------------- bulk actions (companies)
+
+export async function bulkDeleteCompanies(actor: Actor, ids: string[]) {
+  assertCanDelete(actor);
+  const rows = await prisma.company.findMany({ where: { id: { in: ids }, ...ownerScope(actor) }, select: { id: true, name: true } });
+  if (rows.length === 0) return 0;
+  await prisma.company.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+  await Promise.all(rows.map((r) => recordAudit({ actorId: actor.id, entityType: "company", entityId: r.id, action: "deleted", summary: r.name })));
+  return rows.length;
+}
+
+export async function bulkReassignCompanies(actor: Actor, ids: string[], ownerId: string) {
+  if (!can.reassignOwner(actor)) throw forbidden();
+  await assertActiveUser(ownerId);
+  const rows = await prisma.company.findMany({ where: { id: { in: ids }, ...ownerScope(actor) }, select: { id: true, ownerId: true } });
+  if (rows.length === 0) return 0;
+  await prisma.company.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { ownerId } });
+  await Promise.all(
+    rows.map((r) => recordAudit({ actorId: actor.id, entityType: "company", entityId: r.id, action: "updated", changes: { ownerId: { from: r.ownerId, to: ownerId } } })),
+  );
+  await notify({
+    userId: ownerId,
+    skipIfActor: actor.id,
+    type: "assigned",
+    title: `You were assigned ${rows.length} compan${rows.length === 1 ? "y" : "ies"}`,
+    entityType: "company",
+    link: "/companies",
+  });
+  return rows.length;
 }
 
 // ---------------------------------------------------------------- deals
@@ -442,7 +527,8 @@ export async function updateDeal(actor: Actor, id: string, input: unknown) {
   if (!existing) throw new CrmError(404, "Deal not found");
   await assertLinks(actor, { companyId: rest.companyId, contactId: rest.contactId });
 
-  const patch: Prisma.DealUncheckedUpdateInput = { ...rest, ...(await ownerForUpdate(actor, ownerId)) };
+  const ownerPatch = await ownerForUpdate(actor, ownerId);
+  const patch: Prisma.DealUncheckedUpdateInput = { ...rest, ...ownerPatch };
   const newStage = stage !== undefined && stage !== existing.stage ? stage : null;
   if (newStage) {
     patch.stage = newStage;
@@ -460,6 +546,17 @@ export async function updateDeal(actor: Actor, id: string, input: unknown) {
     action: "updated",
     changes: diffRecords(existing, deal, [...DEFAULT_IGNORED, "stage", "probability", "closedAt"]),
   });
+  if (ownerPatch.ownerId && ownerPatch.ownerId !== existing.ownerId) {
+    await notify({
+      userId: ownerPatch.ownerId,
+      skipIfActor: actor.id,
+      type: "assigned",
+      title: `You were assigned the deal "${deal.title}"`,
+      entityType: "deal",
+      entityId: deal.id,
+      link: `/deals/${deal.id}`,
+    });
+  }
   if (newStage) {
     await recordAudit({
       actorId: actor.id,
@@ -469,6 +566,17 @@ export async function updateDeal(actor: Actor, id: string, input: unknown) {
       summary: `${stageInfo(existing.stage).label} → ${stageInfo(newStage).label}`,
       changes: { stage: { from: existing.stage, to: newStage } },
     });
+    if (deal.ownerId && (newStage === "WON" || newStage === "LOST")) {
+      await notify({
+        userId: deal.ownerId,
+        skipIfActor: actor.id,
+        type: newStage === "WON" ? "deal_won" : "deal_lost",
+        title: `Deal "${deal.title}" was marked ${stageInfo(newStage).label}`,
+        entityType: "deal",
+        entityId: deal.id,
+        link: `/deals/${deal.id}`,
+      });
+    }
     await emitEvent("deal.stage_changed", {
       actorId: actor.id,
       deal,
@@ -551,16 +659,36 @@ export async function createActivity(actor: Actor, input: unknown) {
       ?.companyId;
   }
 
-  return prisma.activity.create({
+  const ownerId = await ownerForCreate(actor, data.ownerId);
+  const activity = await prisma.activity.create({
     data: {
       ...data,
       contactId,
       companyId,
       priority: data.priority ?? "MEDIUM",
       completedAt: data.type === "NOTE" ? new Date() : null,
-      ownerId: await ownerForCreate(actor, data.ownerId),
+      ownerId,
     },
   });
+  if (data.type !== "NOTE" && ownerId !== actor.id) {
+    const link = activity.dealId
+      ? `/deals/${activity.dealId}`
+      : contactId
+        ? `/contacts/${contactId}`
+        : companyId
+          ? `/companies/${companyId}`
+          : "/tasks";
+    await notify({
+      userId: ownerId,
+      skipIfActor: actor.id,
+      type: "task_assigned",
+      title: `New ${data.type.toLowerCase()} assigned: ${activity.subject}`,
+      entityType: "activity",
+      entityId: activity.id,
+      link,
+    });
+  }
+  return activity;
 }
 
 export async function updateActivity(actor: Actor, id: string, input: unknown) {

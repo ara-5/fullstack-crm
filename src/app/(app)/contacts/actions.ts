@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { attempt } from "@/lib/actions";
-import { createContact, deleteContact, updateContact } from "@/lib/crm";
+import { bulkDeleteContacts, bulkReassignContacts, bulkTagContacts, createContact, deleteContact, updateContact } from "@/lib/crm";
 import type { ActionState } from "@/lib/errors";
 import { requireUser } from "@/lib/session";
 import { formToObject } from "@/lib/validation";
@@ -32,4 +32,27 @@ export async function deleteContactAction(id: string) {
   await deleteContact(user, id);
   revalidatePath("/", "layout");
   redirect("/contacts");
+}
+
+// ---------------------------------------------------------------- bulk actions
+
+export async function bulkDeleteContactsAction(ids: string[]): Promise<ActionState> {
+  const user = await requireUser();
+  const result = await attempt(() => bulkDeleteContacts(user, ids));
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
+}
+
+export async function bulkReassignContactsAction(ids: string[], ownerId: string): Promise<ActionState> {
+  const user = await requireUser();
+  const result = await attempt(() => bulkReassignContacts(user, ids, ownerId));
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
+}
+
+export async function bulkTagContactsAction(ids: string[], tag: string): Promise<ActionState> {
+  const user = await requireUser();
+  const result = await attempt(() => bulkTagContacts(user, ids, tag));
+  if (result.ok) revalidatePath("/", "layout");
+  return result;
 }

@@ -18,6 +18,10 @@ export type ActionState = {
   details?: string[];
   /** A one-time secret (API key, webhook secret) to show the user once. */
   secret?: string;
+  /** A one-time list of secrets (2FA recovery codes) to show the user once. */
+  secrets?: string[];
+  /** Set by loginAction when the account has 2FA on and a code is still needed. */
+  need2fa?: boolean;
 };
 
 function isUniqueViolation(err: unknown) {
