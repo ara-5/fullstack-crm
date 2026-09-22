@@ -59,9 +59,11 @@ A few things that go beyond a typical CRUD app, if you're skimming for signal:
   a unit test.
 - **Explainable, not just a color.** The deal health score names the specific reasons a deal is at
   risk — gone quiet, missed its close date, no next step — instead of a black-box red/amber/green.
-- **Tested at every layer.** 80+ unit tests (pure logic: TOTP against the RFC 6238 vectors,
-  permissions, deal health, the SSRF guard, CSV) and an end-to-end suite covering auth/2FA, RBAC,
-  drag-and-drop, automations, the REST API and accessibility (axe) — both run in CI on every push,
+- **Tested at every layer.** 100+ unit tests — pure logic (TOTP against the RFC 6238 vectors,
+  permissions, deal health, the SSRF guard, CSV) plus the race-sensitive state machines around the
+  job queue (retry/backoff, exhausted attempts) and AI proposal approval (double-approve, expiry,
+  claim races) against a mocked database — and an end-to-end suite covering auth/2FA, RBAC,
+  drag-and-drop, automations, the REST API and accessibility (axe). Both run in CI on every push,
   against a real Postgres service container.
 
 ## Features
@@ -246,7 +248,8 @@ compute `"sha256=" + HMAC_SHA256(secret, rawBody)` and compare it with the `X-CR
 
 ```bash
 npm test          # unit tests: validation, permissions, automation rules, deal health, SSRF guard,
-                   # CSV, TOTP (verified against the RFC 6238 test vectors)
+                   # CSV, TOTP (verified against the RFC 6238 test vectors), the job queue's
+                   # retry/backoff state machine, and AI proposal approval's race conditions
 npm run build && npm run test:e2e   # end-to-end: auth incl. 2FA, RBAC, pipeline drag-and-drop,
                                      # automations, saved views, bulk actions, notifications,
                                      # presence, the REST API, the command palette, dark mode,
