@@ -14,7 +14,7 @@ real CRM data, gated so every write needs the user's explicit approval, and a du
 job queue instead of fire-and-forget background work — see
 [Engineering highlights](#engineering-highlights) below.
 
-**[Live demo →](#)** _(add your deployed URL here)_ · admin@crm.local / manager@crm.local / rep@crm.local, password `Password123!`
+**[Live demo →](https://fullstack-crm-cyan.vercel.app)** · admin@crm.local / manager@crm.local / rep@crm.local, password `Password123!`
 
 <p align="center">
   <img src="docs/screenshots/dashboard-light.png" width="49%" alt="Dashboard, light theme">
@@ -287,9 +287,10 @@ Point `DATABASE_URL` (pooled) and `DIRECT_URL` (direct, for migrations) at your 
 1. Import the repo, set `DATABASE_URL`/`DIRECT_URL` (a Neon/Supabase Postgres) and `AUTH_SECRET`.
 2. Set `CRON_SECRET` (a random string) — `vercel.json` uses it to authorize two scheduled routes:
    the nightly demo reset and `/api/cron/process-jobs`, which drains the background job queue
-   (webhook delivery, embeddings). **Vercel's Hobby plan only runs cron once a day**; on Hobby,
-   either upgrade to Pro for the 5-minute schedule already set in `vercel.json`, or point an external
-   scheduler (e.g. cron-job.org) at that route more frequently.
+   (webhook delivery, embeddings). **Vercel's Hobby plan only runs cron once a day**, so
+   `vercel.json` schedules both daily by default (a deploy with a more frequent cron is rejected
+   outright on Hobby); on Pro, tighten `process-jobs`'s schedule to run every few minutes, or point
+   an external scheduler (e.g. cron-job.org) at that route instead.
 3. For a public demo: also set `DEMO_MODE=true`.
 4. Optionally set `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, and SMTP variables.
 
