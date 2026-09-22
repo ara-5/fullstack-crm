@@ -3,14 +3,16 @@
 // database migration. Allowed values live in src/lib/constants.ts.
 
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  provider        = "prisma-client-js"
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL") // pooled connection (e.g. Neon pooler) at runtime
-  directUrl = env("DIRECT_URL") // direct connection for migrations
+  provider   = "postgresql"
+  url        = env("DATABASE_URL") // pooled connection (e.g. Neon pooler) at runtime
+  directUrl  = env("DIRECT_URL") // direct connection for migrations
+  extensions = [vector]
 }
 
 model User {
@@ -27,15 +29,17 @@ model User {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  companies     Company[]      @relation("CompanyOwner")
-  contacts      Contact[]      @relation("ContactOwner")
-  deals         Deal[]         @relation("DealOwner")
-  activities    Activity[]     @relation("ActivityOwner")
-  apiKeys       ApiKey[]
-  auditLogs     AuditLog[]
-  notifications Notification[]
-  presences     Presence[]
-  savedViews    SavedView[]
+  companies      Company[]       @relation("CompanyOwner")
+  contacts       Contact[]       @relation("ContactOwner")
+  deals          Deal[]          @relation("DealOwner")
+  activities     Activity[]      @relation("ActivityOwner")
+  apiKeys        ApiKey[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+  presences      Presence[]
+  savedViews     SavedView[]
+  aiCallLogs     AiCallLog[]
+  agentProposals AgentProposal[]
 }
 
 model Company {
@@ -249,4 +253,79 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@index([userId, entity])
+}
+
+/// Durable, retryable background work (webhook delivery, embedding
+/// computation, ...): a Postgres-backed outbox instead of firing work inline
+/// in the request and losing it on a crash or redeploy mid-attempt. Claimed
+/// with `FOR UPDATE SKIP LOCKED` so multiple worker processes can run safely.
+model Job {
+  id          String   @id @default(cuid())
+  type        String
+  payload     Json
+  status      String   @default("PENDING") // PENDING | RUNNING | DONE | FAILED
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+  runAt       DateTime @default(now())
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, runAt])
+}
+
+/// A vector embedding of a record's searchable text, for semantic search and
+/// as retrieval context for the AI assistant. `vector` isn't representable in
+/// Prisma's schema language, so it's managed entirely through raw SQL (see
+/// src/lib/embeddings.ts) — this model exists only so migrations track it.
+model Embedding {
+  id         String                      @id @default(cuid())
+  entityType String // contact | company | deal
+  entityId   String
+  content    String // the text that was embedded, kept for debugging/display
+  vector     Unsupported("vector(1024)")
+  updatedAt  DateTime                    @updatedAt
+
+  @@unique([entityType, entityId])
+}
+
+/// One row per call to the AI provider, for observability: is the assistant
+/// actually being used, is it fast, what does it cost, is it being trusted
+/// (accepted) or overridden (rejected/edited).
+model AiCallLog {
+  id           String   @id @default(cuid())
+  feature      String // deal_insights | agent_command | embedding
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  model        String
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int
+  status       String // ok | error | refused
+  errorMessage String?
+  metadata     Json? // feature-specific detail (prompt excerpt, tool calls, ...)
+  createdAt    DateTime @default(now())
+
+  @@index([feature, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// A write the AI assistant wants to make, held for the user's explicit
+/// approval before anything actually changes (see src/lib/agent.ts). Approval
+/// dispatches to the same service-layer functions the UI uses, so permissions,
+/// validation and the audit log apply exactly as if the user had done it by
+/// hand — the assistant can never do more than the signed-in user already can.
+model AgentProposal {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tool       String
+  args       Json
+  summary    String // human-readable description shown for approval
+  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED
+  resultId   String? // id of the record the approved action created/changed, for linking
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([userId, status, createdAt])
 }

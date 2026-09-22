@@ -75,7 +75,7 @@ export async function generateInsightsAction(id: string): Promise<ActionState> {
     });
     if (!deal) throw forbidden("Deal not found.");
 
-    const insights = await generateDealInsights(deal);
+    const insights = await generateDealInsights(deal, user.id);
     await prisma.deal.update({ where: { id }, data: { aiInsights: insights, aiInsightsAt: new Date() } });
   });
   if (!result.ok) return result;

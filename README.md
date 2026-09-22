@@ -29,6 +29,19 @@ and signed webhooks, all behind role-based access control.
 - **AI assistant** _(optional)_ — one click on a deal summarizes its timeline, assesses risk, and
   drafts a follow-up email, powered by Claude (Opus 5) with structured output. Hidden entirely if
   no API key is configured.
+- **Agentic AI command panel** _(optional)_ — a chat drawer that answers questions and takes
+  actions ("what's overdue this week?", "draft a follow-up to Ada about the renewal") using tools
+  scoped to the signed-in user's own permissions. Reads run immediately; every write (creating a
+  task, moving a deal's stage, sending an email) is held as a proposal card the user must explicitly
+  approve — the assistant can never do more than the user already could by hand.
+- **Semantic search** _(optional)_ — contacts, companies and deals are embedded (Voyage AI) and
+  searchable by meaning, not just keyword match; also gives the AI assistant real retrieval instead
+  of hand-built prompts. Falls back to keyword search alone if unconfigured.
+- **AI observability** — every AI call is logged (latency, tokens, status), visible to admins in
+  Settings, so "is the assistant actually good" is a query, not a guess.
+- **Durable background jobs** — webhook delivery and embedding computation run through a
+  Postgres-backed job queue with retries and backoff, so a crash or redeploy mid-delivery doesn't
+  silently drop work (see `npm run jobs:worker` / the `worker` compose service).
 - **Tasks & activities** — tasks, calls, meetings, emails and notes, with due dates, priorities,
   and overdue/today/upcoming views.
 - **Dashboard & reports** — KPI tiles, won revenue by month, pipeline by stage, a leaderboard,
@@ -100,6 +113,7 @@ docker compose --profile app up --build
 | `npm run db:migrate` | Create/apply a Prisma migration in development |
 | `npm run db:seed` | Reset to fresh demo data |
 | `npm run db:studio` | Browse the database |
+| `npm run jobs:worker` | Continuously processes the background job queue (webhook delivery, embeddings) |
 
 ## Project structure
 
@@ -121,6 +135,11 @@ src/lib/two-factor.ts      2FA login verification (TOTP or a one-time recovery c
 src/lib/notifications.ts   in-app notifications (assignment, deal outcome, automation tasks)
 src/lib/presence.ts        "who else is viewing this" heartbeat, backed by a short-TTL table
 src/lib/saved-views.ts     named, reusable filters for the contacts/companies list pages
+src/lib/jobs.ts            Postgres-backed job queue: enqueue, claim (SKIP LOCKED), retry/backoff
+src/lib/embeddings.ts      pgvector semantic search + the "embed_record" job handler
+src/lib/agent.ts           agentic AI command layer: tools, the tool-use loop, proposal approval
+src/lib/ai-log.ts          AI call logging + usage aggregation (Settings → AI usage)
+scripts/worker.ts          long-running job worker (self-hosted/Docker; Vercel uses a cron route instead)
 src/app/(app)/…            authenticated pages (Server Components + Server Actions)
 src/app/api/v1/…           REST API (API-key auth)
 src/app/api/export/…       CSV export (session auth)

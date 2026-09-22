@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
+import { AiAssistantPanel } from "@/components/ai-assistant-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { Sidebar } from "@/components/sidebar";
 import { signOut } from "@/lib/auth";
-import { env } from "@/lib/env";
+import { env, features } from "@/lib/env";
 import { unreadCount } from "@/lib/notifications";
 import { requireUser } from "@/lib/session";
 
@@ -27,6 +28,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{children}</div>
       </main>
       <CommandPalette role={user.role} />
+      <AiAssistantPanel aiEnabled={features.ai} />
     </div>
   );
 }

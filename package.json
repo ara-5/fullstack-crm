@@ -18,7 +18,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
-    "setup": "docker compose up -d && prisma migrate deploy && prisma db seed"
+    "setup": "docker compose up -d && prisma migrate deploy && prisma db seed",
+    "jobs:worker": "tsx scripts/worker.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

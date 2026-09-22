@@ -5,7 +5,7 @@
 #   docker compose --profile app up --build
 services:
   db:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17 # postgres:17 + the pgvector extension (semantic search)
     container_name: fullstack-crm-db
     restart: unless-stopped
     environment:
@@ -48,6 +48,29 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-change-me-local-docker-secret-0000}
       DEMO_MODE: "true"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Processes the Job outbox (webhook delivery, embeddings, ...) continuously.
+  # Runs from source via tsx (not the standalone build, which strips dev
+  # dependencies and non-route files). On Vercel, the /api/cron/process-jobs
+  # route does this instead (see vercel.json) since there's no long-running
+  # process to host a loop.
+  worker:
+    profiles: [app]
+    build:
+      context: .
+      target: builder
+    command: npx tsx scripts/worker.ts
+    environment:
+      DATABASE_URL: postgresql://crm:crm@db:5432/crm
+      DIRECT_URL: postgresql://crm:crm@db:5432/crm
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-local-docker-secret-0000}
+      DEMO_MODE: "true"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

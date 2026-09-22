@@ -9,7 +9,9 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import Link from "next/link";
 import { listRecentAudit } from "@/lib/audit";
+import { aiUsageSummary } from "@/lib/ai-log";
 import { env, features } from "@/lib/env";
+import { jobQueueSummary } from "@/lib/jobs";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
 const ENTITY_PATHS: Record<string, string> = { contact: "contacts", company: "companies", deal: "deals" };
@@ -42,7 +44,7 @@ export default async function SettingsPage() {
   const user = await requireUser();
   const isAdmin = can.manageUsers(user);
 
-  const [apiKeys, users, webhooks, recentChanges, account] = await Promise.all([
+  const [apiKeys, users, webhooks, recentChanges, account, aiUsage, jobQueue] = await Promise.all([
     prisma.apiKey.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" } }),
     isAdmin
       ? prisma.user.findMany({
@@ -53,6 +55,8 @@ export default async function SettingsPage() {
     isAdmin ? prisma.webhook.findMany({ orderBy: { createdAt: "desc" } }) : Promise.resolve([]),
     isAdmin ? listRecentAudit(20) : Promise.resolve([]),
     prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { twoFactorEnabled: true } }),
+    isAdmin ? aiUsageSummary(7) : Promise.resolve(null),
+    isAdmin ? jobQueueSummary() : Promise.resolve(null),
   ]);
 
   return (
@@ -298,6 +302,113 @@ export default async function SettingsPage() {
                     </li>
                   );
                 })}
+              </ul>
+            )}
+          </Card>
+        )}
+
+        {isAdmin && aiUsage && (
+          <Card title="AI usage" padded={false}>
+            <div className="grid grid-cols-2 gap-4 border-b border-slate-100 p-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Calls (7d)</p>
+                <p className="text-lg font-semibold text-slate-900">{aiUsage.totals._count._all}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Avg latency</p>
+                <p className="text-lg font-semibold text-slate-900">
+                  {aiUsage.totals._avg.latencyMs ? `${Math.round(aiUsage.totals._avg.latencyMs).toLocaleString()} ms` : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Tokens in / out</p>
+                <p className="text-lg font-semibold text-slate-900">
+                  {(aiUsage.totals._sum.inputTokens ?? 0).toLocaleString()} / {(aiUsage.totals._sum.outputTokens ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Assistant proposals</p>
+                <p className="text-lg font-semibold text-slate-900">
+                  {aiUsage.pendingProposals.map((p) => `${p._count._all} ${p.status.toLowerCase()}`).join(", ") || "none"}
+                </p>
+              </div>
+            </div>
+            {aiUsage.byFeature.length > 0 && (
+              <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4">
+                {aiUsage.byFeature.map((row) => (
+                  <Badge key={`${row.feature}-${row.status}`} tone={row.status === "ok" ? "green" : row.status === "refused" ? "amber" : "red"}>
+                    {row.feature} · {row.status}: {row._count._all}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {aiUsage.recent.length === 0 ? (
+              <div className="p-4">
+                <EmptyState>No AI calls in the last 7 days.</EmptyState>
+              </div>
+            ) : (
+              <Table>
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className={th}>Feature</th>
+                    <th className={th}>Model</th>
+                    <th className={th}>Status</th>
+                    <th className={th}>Latency</th>
+                    <th className={th}>Tokens</th>
+                    <th className={th}>User</th>
+                    <th className={th}>When</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {aiUsage.recent.map((call) => (
+                    <tr key={call.id}>
+                      <td className={td}>{call.feature}</td>
+                      <td className={`${td} font-mono text-xs`}>{call.model}</td>
+                      <td className={td}>
+                        <Badge tone={call.status === "ok" ? "green" : call.status === "refused" ? "amber" : "red"}>{call.status}</Badge>
+                      </td>
+                      <td className={td}>{call.latencyMs.toLocaleString()} ms</td>
+                      <td className={td}>
+                        {call.inputTokens ?? "—"} / {call.outputTokens ?? "—"}
+                      </td>
+                      <td className={td}>{call.user?.name ?? "—"}</td>
+                      <td className={td}>{formatDateTime(call.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+          </Card>
+        )}
+
+        {isAdmin && jobQueue && (
+          <Card title="Background jobs" padded={false}>
+            {jobQueue.byTypeStatus.length === 0 ? (
+              <div className="p-4">
+                <EmptyState>No jobs queued yet.</EmptyState>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4">
+                {jobQueue.byTypeStatus.map((row) => (
+                  <Badge
+                    key={`${row.type}-${row.status}`}
+                    tone={row.status === "DONE" ? "green" : row.status === "FAILED" ? "red" : row.status === "RUNNING" ? "blue" : "slate"}
+                  >
+                    {row.type} · {row.status}: {row._count._all}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {jobQueue.recentFailures.length > 0 && (
+              <ul className="divide-y divide-slate-100">
+                {jobQueue.recentFailures.map((job) => (
+                  <li key={job.id} className="px-4 py-2 text-sm">
+                    <p className="text-slate-800">
+                      <span className="font-medium">{job.type}</span> failed after {job.attempts} attempt{job.attempts === 1 ? "" : "s"}
+                    </p>
+                    {job.lastError && <p className="truncate text-xs text-slate-500">{job.lastError}</p>}
+                  </li>
+                ))}
               </ul>
             )}
           </Card>

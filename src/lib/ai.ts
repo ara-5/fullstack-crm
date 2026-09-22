@@ -3,9 +3,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import type { Activity, Company, Contact, Deal } from "@prisma/client";
+import { withAiLog } from "@/lib/ai-log";
 import { CrmError } from "@/lib/errors";
 import { env, features } from "@/lib/env";
 import { formatCurrency, formatDate } from "@/lib/utils";
+
+const MODEL = "claude-opus-5";
 
 let client: Anthropic | null | undefined;
 function getClient() {
@@ -54,26 +57,29 @@ ${timeline}`;
  * call — callers should cache the result (Deal.aiInsights) rather than call
  * this on every page view.
  */
-export async function generateDealInsights(deal: DealForAi): Promise<DealInsights> {
+export async function generateDealInsights(deal: DealForAi, userId?: string): Promise<DealInsights> {
   const anthropic = getClient();
   if (!anthropic) throw new CrmError(503, "The AI assistant is not configured (ANTHROPIC_API_KEY is not set).");
 
-  const response = await anthropic.messages.parse({
-    model: "claude-opus-5",
-    max_tokens: 2000,
-    system:
-      "You are a sales assistant embedded in a CRM. Read the deal's activity timeline and produce a factual " +
-      "summary, a risk assessment, and a short follow-up email draft. Only reference facts present in the " +
-      "timeline — never invent commitments, prices, or dates that weren't given.",
-    messages: [{ role: "user", content: buildPrompt(deal) }],
-    output_config: { format: zodOutputFormat(insightsSchema), effort: "medium" },
-  });
+  return withAiLog({ feature: "deal_insights", userId, model: MODEL, metadata: { dealId: deal.id } }, async () => {
+    const response = await anthropic.messages.parse({
+      model: MODEL,
+      max_tokens: 2000,
+      system:
+        "You are a sales assistant embedded in a CRM. Read the deal's activity timeline and produce a factual " +
+        "summary, a risk assessment, and a short follow-up email draft. Only reference facts present in the " +
+        "timeline — never invent commitments, prices, or dates that weren't given.",
+      messages: [{ role: "user", content: buildPrompt(deal) }],
+      output_config: { format: zodOutputFormat(insightsSchema), effort: "medium" },
+    });
 
-  if (response.stop_reason === "refusal") {
-    throw new CrmError(502, "The AI assistant declined to respond to this request.");
-  }
-  if (!response.parsed_output) {
-    throw new CrmError(502, "The AI assistant returned an unexpected response. Please try again.");
-  }
-  return response.parsed_output;
+    const usage = { inputTokens: response.usage?.input_tokens, outputTokens: response.usage?.output_tokens };
+    if (response.stop_reason === "refusal") {
+      throw new CrmError(502, "The AI assistant declined to respond to this request.");
+    }
+    if (!response.parsed_output) {
+      throw new CrmError(502, "The AI assistant returned an unexpected response. Please try again.");
+    }
+    return { result: response.parsed_output, usage };
+  });
 }

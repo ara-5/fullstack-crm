@@ -20,6 +20,10 @@ const schema = z
     ALLOW_PRIVATE_WEBHOOKS: flag,
     TRUST_PROXY_HEADERS: flag,
     ANTHROPIC_API_KEY: z.string().optional(),
+    // Anthropic doesn't offer an embeddings endpoint; Voyage AI is their
+    // recommended embedding partner. Optional — semantic search and the AI
+    // assistant's record retrieval are hidden/degraded without it.
+    VOYAGE_API_KEY: z.string().optional(),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_USER: z.string().optional(),
@@ -49,4 +53,5 @@ export const features = {
   ai: Boolean(env.ANTHROPIC_API_KEY),
   smtp: Boolean(env.SMTP_HOST) && !env.DEMO_MODE,
   webhooks: !env.DEMO_MODE,
+  semanticSearch: Boolean(env.VOYAGE_API_KEY),
 };

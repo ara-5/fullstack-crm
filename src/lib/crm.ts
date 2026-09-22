@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/automation";
 import { CLOSED_STAGES, OPEN_STAGES, stageInfo, type Role } from "@/lib/constants";
+import { deleteEmbedding, enqueueEmbedding } from "@/lib/embeddings";
 import { DEFAULT_IGNORED, diffRecords } from "@/lib/diff";
 import { CrmError, forbidden } from "@/lib/errors";
 import { notify } from "@/lib/notifications";
@@ -264,6 +265,7 @@ export async function createContact(actor: Actor, input: unknown, opts: EmitOpti
   });
   await recordAudit({ actorId: actor.id, entityType: "contact", entityId: contact.id, action: "created", summary: fullName(contact) });
   if (opts.emit !== false) await emitEvent("contact.created", { actorId: actor.id, contact });
+  await enqueueEmbedding("contact", contact.id);
   return contact;
 }
 
@@ -291,6 +293,7 @@ export async function updateContact(actor: Actor, id: string, input: unknown) {
     });
   }
   await emitEvent("contact.updated", { actorId: actor.id, contact });
+  await enqueueEmbedding("contact", contact.id);
   return contact;
 }
 
@@ -303,6 +306,7 @@ export async function deleteContact(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Contact not found");
   await prisma.contact.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "contact", entityId: id, action: "deleted", summary: fullName(existing) });
+  await deleteEmbedding("contact", id);
 }
 
 // ---------------------------------------------------------------- bulk actions (contacts)
@@ -313,6 +317,7 @@ export async function bulkDeleteContacts(actor: Actor, ids: string[]) {
   if (rows.length === 0) return 0;
   await prisma.contact.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
   await Promise.all(rows.map((r) => recordAudit({ actorId: actor.id, entityType: "contact", entityId: r.id, action: "deleted", summary: fullName(r) })));
+  await Promise.all(rows.map((r) => deleteEmbedding("contact", r.id)));
   return rows.length;
 }
 
@@ -392,6 +397,7 @@ export async function createCompany(actor: Actor, input: unknown) {
   const data = companyInput.parse(input);
   const company = await prisma.company.create({ data: { ...data, ownerId: await ownerForCreate(actor, data.ownerId) } });
   await recordAudit({ actorId: actor.id, entityType: "company", entityId: company.id, action: "created", summary: company.name });
+  await enqueueEmbedding("company", company.id);
   return company;
 }
 
@@ -404,6 +410,7 @@ export async function updateCompany(actor: Actor, id: string, input: unknown) {
     data: { ...rest, ...(await ownerForUpdate(actor, ownerId)) },
   });
   await recordAudit({ actorId: actor.id, entityType: "company", entityId: id, action: "updated", changes: diffRecords(existing, company) });
+  await enqueueEmbedding("company", company.id);
   return company;
 }
 
@@ -413,6 +420,7 @@ export async function deleteCompany(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Company not found");
   await prisma.company.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "company", entityId: id, action: "deleted", summary: existing.name });
+  await deleteEmbedding("company", id);
 }
 
 // ---------------------------------------------------------------- bulk actions (companies)
@@ -423,6 +431,7 @@ export async function bulkDeleteCompanies(actor: Actor, ids: string[]) {
   if (rows.length === 0) return 0;
   await prisma.company.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
   await Promise.all(rows.map((r) => recordAudit({ actorId: actor.id, entityType: "company", entityId: r.id, action: "deleted", summary: r.name })));
+  await Promise.all(rows.map((r) => deleteEmbedding("company", r.id)));
   return rows.length;
 }
 
@@ -518,6 +527,7 @@ export async function createDeal(actor: Actor, input: unknown, opts: EmitOptions
     summary: `${deal.title} (${formatCurrency(deal.value, deal.currency)})`,
   });
   if (opts.emit !== false) await emitEvent("deal.created", { actorId: actor.id, deal });
+  await enqueueEmbedding("deal", deal.id);
   return deal;
 }
 
@@ -584,6 +594,7 @@ export async function updateDeal(actor: Actor, id: string, input: unknown) {
       toStage: newStage,
     });
   }
+  await enqueueEmbedding("deal", deal.id);
   return deal;
 }
 
@@ -593,6 +604,7 @@ export async function deleteDeal(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Deal not found");
   await prisma.deal.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "deal", entityId: id, action: "deleted", summary: existing.title });
+  await deleteEmbedding("deal", id);
 }
 
 // ---------------------------------------------------------------- activities
