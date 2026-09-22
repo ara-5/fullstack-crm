@@ -51,6 +51,12 @@ A few things that go beyond a typical CRUD app, if you're skimming for signal:
   run through a Postgres-backed outbox (`FOR UPDATE SKIP LOCKED`, retry with backoff) instead of
   inline in the request, so a crash or redeploy mid-delivery doesn't silently drop work
   ([`src/lib/jobs.ts`](src/lib/jobs.ts)).
+- **Race-safe under real concurrency, not just in the happy path.** Approving an AI proposal,
+  recording a webhook delivery outcome, and accepting a 2FA code all use atomic conditional updates —
+  a claimed `updateMany`, or a single `CASE`-based `UPDATE` — instead of read-then-write, so two
+  concurrent requests can't double-apply an approved action or race a failure counter into losing an
+  increment. Verified against a live Postgres instance with concurrent requests, not just asserted in
+  a unit test.
 - **Explainable, not just a color.** The deal health score names the specific reasons a deal is at
   risk — gone quiet, missed its close date, no next step — instead of a black-box red/amber/green.
 - **Tested at every layer.** 80+ unit tests (pure logic: TOTP against the RFC 6238 vectors,
