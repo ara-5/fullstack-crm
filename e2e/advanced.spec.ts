@@ -56,7 +56,7 @@ test("bulk-selecting contacts can tag and delete them", async ({ page }) => {
   await page.locator("tbody tr").nth(1).getByRole("checkbox").check();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByText(/No contacts match|0 contacts/)).toBeVisible();
+  await expect(page.getByText("No contacts match these filters.")).toBeVisible();
 });
 
 test("reassigning a record notifies its new owner", async ({ browser }) => {
@@ -101,6 +101,9 @@ test("presence shows another viewer on the same record", async ({ browser }) => 
 
   await a.goto("/contacts?q=Northwind");
   await a.getByRole("link", { name: "Northwind Traders" }).first().click();
+  // The link is a Next.js client-side transition (pushState, no full navigation), so the URL can
+  // update after click() has already resolved — read it too early and this still sees /contacts.
+  await a.waitForURL(/\/companies\//);
   const recordUrl = a.url();
   await b.goto(recordUrl);
 

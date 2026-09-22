@@ -42,7 +42,10 @@ export default async function ContactsPage({ searchParams }: PageProps<"/contact
       />
       <Card padded={false}>
         <SavedViews entity="contacts" basePath="/contacts" current={{ q, status }} views={views} />
-        <form className="flex flex-wrap gap-2 border-b border-slate-100 p-3" role="search">
+        {/* Keyed so a same-route navigation (saved view, pagination, back/forward) remounts these
+            uncontrolled inputs — React only applies defaultValue on mount, so without this they'd
+            keep showing whatever was typed/selected before the URL's query params changed. */}
+        <form key={`${q ?? ""}:${status ?? ""}`} className="flex flex-wrap gap-2 border-b border-slate-100 p-3" role="search">
           <Input name="q" defaultValue={q} placeholder="Search name, email or company" aria-label="Search contacts" className="sm:max-w-xs" />
           <Select name="status" defaultValue={status ?? ""} aria-label="Status" className="w-auto">
             <option value="">All statuses</option>

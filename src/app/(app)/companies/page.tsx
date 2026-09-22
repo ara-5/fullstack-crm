@@ -40,7 +40,10 @@ export default async function CompaniesPage({ searchParams }: PageProps<"/compan
       />
       <Card padded={false}>
         <SavedViews entity="companies" basePath="/companies" current={{ q }} views={views} />
-        <form className="flex flex-wrap gap-2 border-b border-slate-100 p-3" role="search">
+        {/* Keyed so a same-route navigation (saved view, pagination, back/forward) remounts this
+            uncontrolled input — React only applies defaultValue on mount, so without this it'd
+            keep showing whatever was typed before the URL's query params changed. */}
+        <form key={q ?? ""} className="flex flex-wrap gap-2 border-b border-slate-100 p-3" role="search">
           <Input name="q" defaultValue={q} placeholder="Search name, domain or industry" aria-label="Search companies" className="sm:max-w-xs" />
           <Button type="submit" variant="secondary">
             Search
