@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { recordAudit } from "@/lib/audit";
 import { emitEvent } from "@/lib/automation";
 import { CLOSED_STAGES, OPEN_STAGES, stageInfo, type Role } from "@/lib/constants";
-import { deleteEmbedding, enqueueEmbedding } from "@/lib/embeddings";
+import { enqueueEmbedding, safeDeleteEmbedding } from "@/lib/embeddings";
 import { DEFAULT_IGNORED, diffRecords } from "@/lib/diff";
 import { CrmError, forbidden } from "@/lib/errors";
 import { notify } from "@/lib/notifications";
@@ -306,7 +306,7 @@ export async function deleteContact(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Contact not found");
   await prisma.contact.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "contact", entityId: id, action: "deleted", summary: fullName(existing) });
-  await deleteEmbedding("contact", id);
+  await safeDeleteEmbedding("contact", id);
 }
 
 // ---------------------------------------------------------------- bulk actions (contacts)
@@ -317,7 +317,7 @@ export async function bulkDeleteContacts(actor: Actor, ids: string[]) {
   if (rows.length === 0) return 0;
   await prisma.contact.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
   await Promise.all(rows.map((r) => recordAudit({ actorId: actor.id, entityType: "contact", entityId: r.id, action: "deleted", summary: fullName(r) })));
-  await Promise.all(rows.map((r) => deleteEmbedding("contact", r.id)));
+  await Promise.all(rows.map((r) => safeDeleteEmbedding("contact", r.id)));
   return rows.length;
 }
 
@@ -420,7 +420,7 @@ export async function deleteCompany(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Company not found");
   await prisma.company.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "company", entityId: id, action: "deleted", summary: existing.name });
-  await deleteEmbedding("company", id);
+  await safeDeleteEmbedding("company", id);
 }
 
 // ---------------------------------------------------------------- bulk actions (companies)
@@ -431,7 +431,7 @@ export async function bulkDeleteCompanies(actor: Actor, ids: string[]) {
   if (rows.length === 0) return 0;
   await prisma.company.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
   await Promise.all(rows.map((r) => recordAudit({ actorId: actor.id, entityType: "company", entityId: r.id, action: "deleted", summary: r.name })));
-  await Promise.all(rows.map((r) => deleteEmbedding("company", r.id)));
+  await Promise.all(rows.map((r) => safeDeleteEmbedding("company", r.id)));
   return rows.length;
 }
 
@@ -604,7 +604,7 @@ export async function deleteDeal(actor: Actor, id: string) {
   if (!existing) throw new CrmError(404, "Deal not found");
   await prisma.deal.delete({ where: { id } });
   await recordAudit({ actorId: actor.id, entityType: "deal", entityId: id, action: "deleted", summary: existing.title });
-  await deleteEmbedding("deal", id);
+  await safeDeleteEmbedding("deal", id);
 }
 
 // ---------------------------------------------------------------- activities

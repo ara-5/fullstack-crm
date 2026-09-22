@@ -1,5 +1,6 @@
 import "server-only";
 import crypto from "node:crypto";
+import { Prisma } from "@prisma/client";
 import type { Actor, SearchResult } from "@/lib/crm";
 import { env, features } from "@/lib/env";
 import { enqueueJob, registerJobHandler } from "@/lib/jobs";
@@ -20,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 export type EmbeddableEntity = "contact" | "company" | "deal";
 const EMBEDDING_MODEL = "voyage-3.5";
 const EMBEDDING_DIMENSIONS = 1024;
+const TABLE_BY_ENTITY: Record<EmbeddableEntity, string> = { contact: "Contact", company: "Company", deal: "Deal" };
 
 async function embedTexts(texts: string[], inputType: "document" | "query"): Promise<number[][]> {
   if (!env.VOYAGE_API_KEY) throw new Error("VOYAGE_API_KEY is not set");
@@ -62,14 +64,35 @@ async function buildEmbeddingText(entityType: EmbeddableEntity, entityId: string
     .join(" — ");
 }
 
-/** Queues (or refreshes) the embedding for a record. Fire-and-forget from the caller's perspective, but the enqueue itself is awaited so it's durable. */
-export function enqueueEmbedding(entityType: EmbeddableEntity, entityId: string) {
-  if (!features.semanticSearch) return Promise.resolve();
-  return enqueueJob("embed_record", { entityType, entityId });
+/**
+ * Queues (or refreshes) the embedding for a record. Best-effort: called
+ * inline from crm.ts's create/update functions, so a transient failure here
+ * (e.g. a Job-table insert error) must never make an otherwise-successful
+ * contact/company/deal write look like it failed to the caller — same
+ * principle as logAiCall's "observability must never take down the feature
+ * it's observing".
+ */
+export async function enqueueEmbedding(entityType: EmbeddableEntity, entityId: string) {
+  if (!features.semanticSearch) return;
+  try {
+    await enqueueJob("embed_record", { entityType, entityId });
+  } catch (err) {
+    console.error(`[embeddings] failed to enqueue embedding for ${entityType}:${entityId}:`, err);
+  }
 }
 
+/** Throws on failure — used internally by runEmbedRecordJob, where a real error should make the job retry. */
 export async function deleteEmbedding(entityType: EmbeddableEntity, entityId: string) {
   await prisma.embedding.deleteMany({ where: { entityType, entityId } });
+}
+
+/** Same as deleteEmbedding, but best-effort (see enqueueEmbedding) — for crm.ts's fire-and-forget delete call sites. */
+export async function safeDeleteEmbedding(entityType: EmbeddableEntity, entityId: string) {
+  try {
+    await deleteEmbedding(entityType, entityId);
+  } catch (err) {
+    console.error(`[embeddings] failed to delete embedding for ${entityType}:${entityId}:`, err);
+  }
 }
 
 async function runEmbedRecordJob(rawPayload: unknown) {
@@ -84,9 +107,19 @@ async function runEmbedRecordJob(rawPayload: unknown) {
     throw new Error(`Voyage returned a ${vector.length}-dimension vector, expected ${EMBEDDING_DIMENSIONS}`);
   }
   const literal = toVectorLiteral(vector);
+
+  // The WHERE EXISTS re-checks the record still exists in the same statement
+  // as the write: buildEmbeddingText/embedTexts above can take a while (a
+  // live Voyage API call), during which the record could be deleted. Without
+  // this, the upsert could recreate an embedding — including the deleted
+  // record's PII — for a record that no longer exists, with nothing left to
+  // ever clean it up. TABLE_BY_ENTITY is a fixed 3-way map, never derived
+  // from request input, so interpolating it as a raw identifier is safe.
+  const table = Prisma.raw(`"${TABLE_BY_ENTITY[entityType]}"`);
   await prisma.$executeRaw`
     INSERT INTO "Embedding" ("id", "entityType", "entityId", "content", "vector", "updatedAt")
-    VALUES (${crypto.randomUUID()}, ${entityType}, ${entityId}, ${content}, ${literal}::vector, NOW())
+    SELECT ${crypto.randomUUID()}, ${entityType}, ${entityId}, ${content}, ${literal}::vector, NOW()
+    WHERE EXISTS (SELECT 1 FROM ${table} WHERE id = ${entityId})
     ON CONFLICT ("entityType", "entityId")
     DO UPDATE SET "content" = EXCLUDED."content", "vector" = EXCLUDED."vector", "updatedAt" = NOW()`;
 }

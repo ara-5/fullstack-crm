@@ -322,7 +322,7 @@ model AgentProposal {
   tool       String
   args       Json
   summary    String // human-readable description shown for approval
-  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED
+  status     String    @default("PENDING") // PENDING | APPLYING | APPROVED | REJECTED | EXPIRED | FAILED
   resultId   String? // id of the record the approved action created/changed, for linking
   createdAt  DateTime  @default(now())
   resolvedAt DateTime?

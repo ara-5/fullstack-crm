@@ -94,7 +94,19 @@ const TOOLS: ToolDef[] = [
     description: "Search contacts, companies and deals by name, email, domain or title. Use this to find a record's id before acting on it.",
     schema: searchArgs,
     run: async (args: z.infer<typeof searchArgs>, actor) => {
-      const [keyword, semantic] = await Promise.all([searchRecords(actor, args.query), semanticSearch(actor, args.query, 5)]);
+      // allSettled: semantic search is an optional dependency (Voyage AI) —
+      // if it errors or times out, keyword search (a plain DB query with no
+      // external dependency) should still come back instead of the whole
+      // tool call failing.
+      const [keywordResult, semanticResult] = await Promise.allSettled([
+        searchRecords(actor, args.query),
+        semanticSearch(actor, args.query, 5),
+      ]);
+      if (semanticResult.status === "rejected") {
+        console.error("[agent] semantic search failed, falling back to keyword only:", semanticResult.reason);
+      }
+      const keyword = keywordResult.status === "fulfilled" ? keywordResult.value : [];
+      const semantic = semanticResult.status === "fulfilled" ? semanticResult.value : [];
       const seen = new Set<string>();
       return [...keyword, ...semantic]
         .filter((r) => (seen.has(`${r.group}:${r.id}`) ? false : (seen.add(`${r.group}:${r.id}`), true)))
@@ -291,20 +303,41 @@ export async function resolveAgentProposal(actor: Actor, proposalId: string, app
   const proposal = await prisma.agentProposal.findUnique({ where: { id: proposalId } });
   if (!proposal || proposal.userId !== actor.id) throw new CrmError(404, "Proposal not found.");
   if (proposal.status !== "PENDING") throw new CrmError(409, "This proposal was already resolved.");
-  if (Date.now() - proposal.createdAt.getTime() > PROPOSAL_TTL_MS) {
-    await prisma.agentProposal.update({ where: { id: proposal.id }, data: { status: "EXPIRED", resolvedAt: new Date() } });
-    throw new CrmError(410, "This proposal expired. Ask the assistant again.");
-  }
 
-  if (!approve) {
-    await prisma.agentProposal.update({ where: { id: proposal.id }, data: { status: "REJECTED", resolvedAt: new Date() } });
+  const expired = Date.now() - proposal.createdAt.getTime() > PROPOSAL_TTL_MS;
+  if (expired || !approve) {
+    // Rejecting/expiring has no side effect beyond the status write itself, so
+    // a conditional claim (only succeeding from PENDING) is enough to make it
+    // race-safe against a concurrent resolve of the same proposal.
+    const { count } = await prisma.agentProposal.updateMany({
+      where: { id: proposal.id, status: "PENDING" },
+      data: { status: expired ? "EXPIRED" : "REJECTED", resolvedAt: new Date() },
+    });
+    if (count === 0) throw new CrmError(409, "This proposal was already resolved.");
+    if (expired) throw new CrmError(410, "This proposal expired. Ask the assistant again.");
     return { message: "Dismissed." };
   }
 
   const tool = applyByTool.get(proposal.tool);
   if (!tool) throw new CrmError(500, "Unknown proposal type.");
   const args = tool.schema.parse(proposal.args); // re-validated; the DB row isn't trusted as pre-validated input
-  const { resultId, message } = await tool.apply(args as never, actor);
-  await prisma.agentProposal.update({ where: { id: proposal.id }, data: { status: "APPROVED", resolvedAt: new Date(), resultId } });
-  return { message };
+
+  // Claim the proposal *before* applying its side effect (sending an email,
+  // creating a task, ...). Without this, two concurrent approve calls for the
+  // same proposal (a double-click, two open tabs) could both pass the PENDING
+  // check above and both call tool.apply(), duplicating the action.
+  const claimed = await prisma.agentProposal.updateMany({
+    where: { id: proposal.id, status: "PENDING" },
+    data: { status: "APPLYING" },
+  });
+  if (claimed.count === 0) throw new CrmError(409, "This proposal was already resolved.");
+
+  try {
+    const { resultId, message } = await tool.apply(args as never, actor);
+    await prisma.agentProposal.update({ where: { id: proposal.id }, data: { status: "APPROVED", resolvedAt: new Date(), resultId } });
+    return { message };
+  } catch (err) {
+    await prisma.agentProposal.update({ where: { id: proposal.id }, data: { status: "FAILED", resolvedAt: new Date() } });
+    throw err;
+  }
 }

@@ -31,7 +31,11 @@ export async function deliverWebhooks(event: CrmEvent, data: unknown) {
       return name === "*" || name === event;
     }),
   );
-  await Promise.all(
+  // allSettled, not all: this is called from automation.ts's after() with no
+  // error handling, and used to be structurally unable to throw (deliver()
+  // caught everything internally). One hook's enqueue failing (a transient DB
+  // error) must not take the rest of the batch down with it.
+  const results = await Promise.allSettled(
     targets.map((hook) =>
       // The same delivery id is sent on every retry so receivers can de-duplicate.
       enqueueJob(
@@ -41,6 +45,9 @@ export async function deliverWebhooks(event: CrmEvent, data: unknown) {
       ),
     ),
   );
+  for (const result of results) {
+    if (result.status === "rejected") console.error("[webhooks] failed to enqueue a delivery job:", result.reason);
+  }
 }
 
 function isRetryable(status: number) {
@@ -113,22 +120,31 @@ async function runWebhookDeliveryJob(rawPayload: unknown, ctx: { attempt: number
     blocked = err instanceof CrmError; // e.g. SSRF guard: retrying won't help
   }
 
-  await prisma.webhook.update({ where: { id: hook.id }, data: { lastStatus: status, lastError: error, lastDeliveredAt: new Date() } });
-
   const ok = status >= 200 && status < 300;
-  if (ok) {
-    await prisma.webhook.update({ where: { id: hook.id }, data: { failureCount: 0 } });
-    return;
+  const retryable = !ok && !blocked && isRetryable(status);
+  const terminal = ok || !retryable || ctx.attempt >= ctx.maxAttempts; // this delivery's outcome is final
+
+  if (terminal) {
+    // One atomic statement: failureCount/active are computed from the row's
+    // live value inside Postgres, not read-then-written from application
+    // code. processJobs can run several deliveries for the same hook
+    // concurrently (Promise.all over a claimed batch), so two independent
+    // statements — one resetting to 0 on success, one incrementing on
+    // failure — could race and silently lose an increment, letting a hook
+    // that's actually failing repeatedly dodge the auto-disable threshold.
+    await prisma.$executeRaw`
+      UPDATE "Webhook" SET
+        "lastStatus" = ${status},
+        "lastError" = ${error},
+        "lastDeliveredAt" = NOW(),
+        "failureCount" = CASE WHEN ${ok} THEN 0 ELSE "failureCount" + 1 END,
+        "active" = CASE WHEN NOT ${ok} AND "failureCount" + 1 >= ${AUTO_DISABLE_AFTER} THEN false ELSE "active" END
+      WHERE id = ${hook.id}`;
+  } else {
+    await prisma.webhook.update({ where: { id: hook.id }, data: { lastStatus: status, lastError: error, lastDeliveredAt: new Date() } });
   }
 
-  const retryable = !blocked && isRetryable(status);
-  const terminal = !retryable || ctx.attempt >= ctx.maxAttempts; // this job won't be retried again
-  if (terminal) {
-    const updated = await prisma.webhook.update({ where: { id: hook.id }, data: { failureCount: { increment: 1 } } });
-    if (updated.failureCount >= AUTO_DISABLE_AFTER) {
-      await prisma.webhook.update({ where: { id: hook.id }, data: { active: false } });
-    }
-  }
+  if (ok) return;
   if (retryable) throw new RetryableJobError(error ?? "delivery failed");
   throw new Error(error ?? "delivery failed");
 }
