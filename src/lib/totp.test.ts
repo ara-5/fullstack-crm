@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { base32Decode, base32Encode, generateRecoveryCodes, generateTotpSecret, totp, totpKeyUri, verifyTotp } from "@/lib/totp";
+import {
+  base32Decode,
+  base32Encode,
+  generateRecoveryCodes,
+  generateTotpSecret,
+  totp,
+  totpKeyUri,
+  verifyTotp,
+  verifyTotpStep,
+} from "@/lib/totp";
 
 // RFC 6238 Appendix B test vectors (SHA-1, 30s step). The RFC's reference codes
 // are 8 digits; the last 6 digits equal our 6-digit codes since truncation to
@@ -33,6 +42,15 @@ describe("totp", () => {
     const twoStepsAgo = totp(secret, now - 60_000);
     expect(verifyTotp(secret, oneStepAgo, now)).toBe(true);
     expect(verifyTotp(secret, twoStepsAgo, now)).toBe(false);
+  });
+
+  it("returns the matched step counter, for replay protection", () => {
+    const secret = generateTotpSecret();
+    const now = Date.now();
+    const counter = Math.floor(now / 1000 / 30);
+    expect(verifyTotpStep(secret, totp(secret, now), now)).toBe(counter);
+    expect(verifyTotpStep(secret, totp(secret, now - 30_000), now)).toBe(counter - 1);
+    expect(verifyTotpStep(secret, "abc", now)).toBeNull();
   });
 
   it("rejects a wrong code and malformed input", () => {

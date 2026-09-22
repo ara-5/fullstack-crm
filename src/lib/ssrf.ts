@@ -38,12 +38,21 @@ export function isPrivateAddress(ip: string): boolean {
   return true; // not an IP at all: treat as unsafe
 }
 
+export type PublicUrlCheck = { url: URL; addresses: string[] };
+
 /**
  * Guards outbound webhook requests against SSRF: http(s) only, and every
  * address the host resolves to must be public. Re-checked before each delivery
  * so a DNS change can't turn an approved URL into an internal one.
+ *
+ * Returns the resolved addresses so the caller can pin the actual connection
+ * to them (see deliverPinned in webhooks.ts) — otherwise a second, independent
+ * DNS lookup at request time (e.g. inside fetch()) could be answered
+ * differently by an attacker-controlled DNS server (DNS rebinding), letting a
+ * URL that looked public at check time resolve to an internal address by the
+ * time the request actually goes out.
  */
-export async function assertPublicUrl(rawUrl: string, allowPrivate = false) {
+export async function assertPublicUrl(rawUrl: string, allowPrivate = false): Promise<PublicUrlCheck> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -53,7 +62,7 @@ export async function assertPublicUrl(rawUrl: string, allowPrivate = false) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new CrmError(422, "Webhook URLs must use http or https");
   }
-  if (allowPrivate) return url;
+  if (allowPrivate) return { url, addresses: [] };
 
   const host = url.hostname.replace(/^\[|\]$/g, "");
   let addresses: string[];
@@ -69,5 +78,5 @@ export async function assertPublicUrl(rawUrl: string, allowPrivate = false) {
   if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
     throw new CrmError(422, "Webhook URLs must point to a public internet address");
   }
-  return url;
+  return { url, addresses };
 }

@@ -52,15 +52,24 @@ export function totp(secret: string, time: number = Date.now()): string {
   return hotp(secret, Math.floor(time / 1000 / STEP_SECONDS));
 }
 
-/** Accepts the current step and one step of clock drift on either side. */
-export function verifyTotp(secret: string, token: string, time: number = Date.now(), window = 1): boolean {
+/**
+ * Accepts the current step and one step of clock drift on either side.
+ * Returns the matched step counter (for replay protection — see
+ * verifyTotpStep's callers) or null if the code didn't match.
+ */
+export function verifyTotpStep(secret: string, token: string, time: number = Date.now(), window = 1): number | null {
   const cleaned = token.trim();
-  if (!/^\d{6}$/.test(cleaned)) return false;
+  if (!/^\d{6}$/.test(cleaned)) return null;
   const counter = Math.floor(time / 1000 / STEP_SECONDS);
   for (let i = -window; i <= window; i++) {
-    if (crypto.timingSafeEqual(Buffer.from(hotp(secret, counter + i)), Buffer.from(cleaned))) return true;
+    if (crypto.timingSafeEqual(Buffer.from(hotp(secret, counter + i)), Buffer.from(cleaned))) return counter + i;
   }
-  return false;
+  return null;
+}
+
+/** Accepts the current step and one step of clock drift on either side. */
+export function verifyTotp(secret: string, token: string, time: number = Date.now(), window = 1): boolean {
+  return verifyTotpStep(secret, token, time, window) !== null;
 }
 
 export function totpKeyUri(secret: string, email: string, issuer = "CRM"): string {

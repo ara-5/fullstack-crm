@@ -1,5 +1,7 @@
 import "server-only";
 import crypto from "node:crypto";
+import net from "node:net";
+import { Agent } from "undici";
 import type { Webhook } from "@prisma/client";
 import type { CrmEvent } from "@/lib/constants";
 import { env, features } from "@/lib/env";
@@ -32,6 +34,36 @@ function isRetryable(status: number) {
   return status === 0 || status === 429 || status >= 500;
 }
 
+/**
+ * Pins the connection to an address we already validated as public, instead
+ * of letting fetch() re-resolve the hostname itself. Without this, a second,
+ * independent DNS lookup happens right as the request goes out; an attacker
+ * controlling the DNS server for the webhook's hostname can answer the first
+ * lookup (assertPublicUrl) with a public IP and the second (fetch's own) with
+ * an internal one, turning an approved URL into an SSRF against internal
+ * services (DNS rebinding). TLS servername/cert validation still uses the
+ * original hostname, so this doesn't weaken certificate checking.
+ */
+function pinnedDispatcher(addresses: string[]) {
+  return new Agent({
+    connect: {
+      // Node's net.connect() calls this with { all: true } by default
+      // (happy-eyeballs), expecting the array-form callback rather than the
+      // classic single-address one — both are handled here.
+      lookup: (_hostname, options, callback) => {
+        const address = addresses[0];
+        if (!address) {
+          callback(new Error("No pinned address available"), options?.all ? [] : "", 4);
+          return;
+        }
+        const family = net.isIPv6(address) ? 6 : 4;
+        if (options?.all) callback(null, [{ address, family }]);
+        else callback(null, address, family);
+      },
+    },
+  });
+}
+
 async function deliver(hook: Webhook, event: CrmEvent, data: unknown) {
   // The same delivery id is sent on every retry so receivers can de-duplicate.
   const body = JSON.stringify({ id: crypto.randomUUID(), event, data, sentAt: new Date().toISOString() });
@@ -40,7 +72,7 @@ async function deliver(hook: Webhook, event: CrmEvent, data: unknown) {
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await assertPublicUrl(hook.url, env.ALLOW_PRIVATE_WEBHOOKS);
+      const { addresses } = await assertPublicUrl(hook.url, env.ALLOW_PRIVATE_WEBHOOKS);
       const res = await fetch(hook.url, {
         method: "POST",
         redirect: "manual", // never follow redirects to internal hosts
@@ -53,6 +85,7 @@ async function deliver(hook: Webhook, event: CrmEvent, data: unknown) {
         },
         body,
         signal: AbortSignal.timeout(5000),
+        ...(addresses.length > 0 && { dispatcher: pinnedDispatcher(addresses) }),
       });
       status = res.status;
       error = res.ok ? null : `HTTP ${res.status}`;

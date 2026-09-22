@@ -49,10 +49,14 @@ describe("assertPublicUrl", () => {
   });
 
   it("accepts public IP literals", async () => {
-    await expect(assertPublicUrl("https://8.8.8.8/hook")).resolves.toBeInstanceOf(URL);
+    const { url, addresses } = await assertPublicUrl("https://8.8.8.8/hook");
+    expect(url).toBeInstanceOf(URL);
+    expect(addresses).toEqual(["8.8.8.8"]);
   });
 
   it("allows private addresses only when explicitly enabled", async () => {
-    await expect(assertPublicUrl("http://127.0.0.1:8080/hook", true)).resolves.toBeInstanceOf(URL);
+    const { url, addresses } = await assertPublicUrl("http://127.0.0.1:8080/hook", true);
+    expect(url).toBeInstanceOf(URL);
+    expect(addresses).toEqual([]);
   });
 });

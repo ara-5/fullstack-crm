@@ -23,6 +23,7 @@ model User {
   twoFactorSecret        String? // base32; set as soon as setup begins, only trusted once twoFactorEnabled
   twoFactorEnabled       Boolean  @default(false)
   twoFactorRecoveryCodes Json? // array of bcrypt hashes, each usable once
+  twoFactorLastUsedStep  Int? // TOTP step counter of the last code accepted at login, so a captured code can't be replayed
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 

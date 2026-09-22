@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { env } from "@/lib/env";
 
 export type RateLimitResult = { ok: boolean; count: number; remaining: number; resetAt: Date };
 
@@ -27,8 +28,23 @@ export async function isLimited(key: string, limit: number) {
   return Boolean(row && row.resetAt > new Date() && row.count >= limit);
 }
 
+/**
+ * The client IP is only as trustworthy as the proxy in front of us: anyone can
+ * set X-Forwarded-For directly. Without TRUST_PROXY_HEADERS (the safe default
+ * for a directly-exposed deployment) we don't trust it at all, so the IP-based
+ * limiter simply doesn't engage — the per-account limiter still does. With it
+ * set (behind exactly one reverse proxy / Vercel), we take the *last* entry,
+ * i.e. the peer our proxy actually saw, since an attacker can prepend fake
+ * entries to the header but can't fabricate what the proxy itself observed.
+ */
 export function clientIp(headers: Headers) {
-  return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip") || "unknown";
+  if (!env.TRUST_PROXY_HEADERS) return "unknown";
+  const forwarded = headers.get("x-forwarded-for");
+  if (forwarded) {
+    const parts = forwarded.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return headers.get("x-real-ip") || "unknown";
 }
 
 export function retryAfterSeconds(resetAt: Date) {
