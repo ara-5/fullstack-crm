@@ -31,3 +31,6 @@ Include steps to reproduce and the impact you observed. You'll get a response wi
 - **Headers:** `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and a strict referrer policy.
 - **Public demo:** with `DEMO_MODE=true`, real email and webhook delivery and account management are
   disabled, and the data is reset nightly.
+- **Automated scanning:** [CodeQL](.github/workflows/codeql.yml) runs static analysis on every push,
+  pull request, and weekly on a schedule. [Dependabot](.github/dependabot.yml) opens a PR for
+  vulnerable or outdated npm, GitHub Actions, and Docker base image dependencies.

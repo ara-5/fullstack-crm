@@ -1,6 +1,7 @@
 # CRM
 
 [![CI](https://github.com/ara-5/fullstack-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/ara-5/fullstack-crm/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/ara-5/fullstack-crm/actions/workflows/codeql.yml/badge.svg)](https://github.com/ara-5/fullstack-crm/actions/workflows/codeql.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript)
