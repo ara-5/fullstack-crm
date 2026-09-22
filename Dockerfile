@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- dependencies
-FROM node:22-alpine AS deps
+FROM node:25-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache openssl
 COPY package.json package-lock.json ./
@@ -20,7 +20,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 RUN npx prisma generate && npm run build
 
 # ---- runtime: minimal standalone server
-FROM node:22-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 RUN apk add --no-cache openssl && addgroup -S nodejs && adduser -S nextjs -G nodejs
 ENV NODE_ENV=production \
