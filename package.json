@@ -45,7 +45,7 @@
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
     "undici": "^8.11.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
